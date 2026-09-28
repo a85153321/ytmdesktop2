@@ -1,22 +1,22 @@
 import { EventEmitter } from "node:events";
-import { YtmClient } from "@main/ytm/ytm-client";
 import { serverMain } from "@main/ipc/serverEvents";
 import { getAppWindows, getLifecycleContext, getYoutubeView, onAfterInit, requireAppWindows } from "@main/lifecycle";
 import { thumbnailCache } from "@main/services/thumbnailCache";
+import { YtmClient } from "@main/ytm/ytm-client";
 import IPC_EVENT_NAMES from "@shared/constants/eventNames";
-import type { TrackData } from "@shared/track/trackData";
 import {
 	decideLastFmSession,
+	LASTFM_NP_REFRESH_AFTER_PAUSE_MS,
+	LASTFM_SCROBBLE_MAX_WAIT_SEC,
+	LASTFM_SCROBBLE_MIN_DURATION_SEC,
 	lastFmScrobbleRemainingMs,
 	preferLastFmTrack,
 	relatedIdsIntersect,
 	relatedVideoIds,
 	shouldRefreshLastFmNowPlaying,
 	trackNeedsLastFmPush,
-	LASTFM_NP_REFRESH_AFTER_PAUSE_MS,
-	LASTFM_SCROBBLE_MIN_DURATION_SEC,
-	LASTFM_SCROBBLE_MAX_WAIT_SEC,
 } from "@shared/track/lastfmTrackSession";
+import type { TrackData } from "@shared/track/trackData";
 import { createLogger } from "@shared/utils/console";
 import { observable } from "@trpc/server/observable";
 import { ipcMain } from "electron";
@@ -36,6 +36,11 @@ export type TrackState = {
 	percentage: number;
 	eventType: "state" | "progress";
 	accent: string | null;
+};
+
+export type VolumeState = {
+	volume: number;
+	muted: boolean;
 };
 
 type TrackControlResponse = { isPlaying: boolean; time: number };
@@ -139,6 +144,7 @@ export class TrackService {
 	private postScrobbleNpTimer: ReturnType<typeof setTimeout> | null = null;
 	private _ipcBound = false;
 	private _styleBound = false;
+	private _volumeState: VolumeState = { volume: 100, muted: false };
 	private readonly onProgressHandlerDebounced = debounce(this.onProgressHandler.bind(this), 1000);
 
 	/** Settle window before notifying Last.fm / socket API — UI stays instant. */
@@ -164,6 +170,25 @@ export class TrackService {
 
 	get trackState() {
 		return this._trackState;
+	}
+
+	get volumeState() {
+		return this._volumeState;
+	}
+
+	getVolumeState(): VolumeState {
+		return { ...this._volumeState };
+	}
+
+	private onVolumeChange(data: { volume?: number; muted?: boolean }) {
+		if (data && typeof data.volume === "number") {
+			const volume = Math.max(0, Math.min(100, Math.round(data.volume)));
+			const muted = Boolean(data.muted);
+			if (this._volumeState.volume !== volume || this._volumeState.muted !== muted) {
+				this._volumeState = { volume, muted };
+				events.emit("track:volume-change", { ...this._volumeState });
+			}
+		}
 	}
 
 	get playing() {
@@ -194,6 +219,7 @@ export class TrackService {
 		// Last.fm + UI progress: 50ms. Discord timeline: separate 1s handler (no Last.fm).
 		serverMain.on(IPC_EVENT_NAMES.TRACK_PLAYSTATE_PROGRESS, debounce(this.onPlayStateProgress.bind(this), 50));
 		serverMain.on(IPC_EVENT_NAMES.TRACK_PLAYSTATE_PROGRESS, this.onProgressHandlerDebounced);
+		serverMain.on(IPC_EVENT_NAMES.TRACK_VOLUME, (_ev, data) => this.onVolumeChange(data));
 	}
 
 	afterInit(): void {
@@ -259,16 +285,52 @@ export class TrackService {
 		return await this.executeCommand<TrackControlResponse>("shuffle");
 	}
 
-	async volumeTrack(data?: { volume?: number }): Promise<{ volume: number }> {
-		return await this.executeCommand<{ volume: number }>("volume", data);
+	async volumeTrack(data?: { volume?: number }): Promise<VolumeState> {
+		const res = await this.executeCommand<VolumeState>("volume", data);
+		if (res && typeof res.volume === "number") {
+			this.onVolumeChange(res);
+		}
+		return { ...this._volumeState };
 	}
 
-	async volumeUpTrack(data?: { amount?: number }): Promise<{ volume: number }> {
-		return await this.executeCommand<{ volume: number }>("volumeUp", data);
+	async volumeUpTrack(data?: { amount?: number }): Promise<VolumeState> {
+		const res = await this.executeCommand<VolumeState>("volumeUp", data);
+		if (res && typeof res.volume === "number") {
+			this.onVolumeChange(res);
+		}
+		return { ...this._volumeState };
 	}
 
-	async volumeDownTrack(data?: { amount?: number }): Promise<{ volume: number }> {
-		return await this.executeCommand<{ volume: number }>("volumeDown", data);
+	async volumeDownTrack(data?: { amount?: number }): Promise<VolumeState> {
+		const res = await this.executeCommand<VolumeState>("volumeDown", data);
+		if (res && typeof res.volume === "number") {
+			this.onVolumeChange(res);
+		}
+		return { ...this._volumeState };
+	}
+
+	async muteTrack(): Promise<VolumeState> {
+		const res = await this.executeCommand<VolumeState>("mute");
+		if (res && typeof res.volume === "number") {
+			this.onVolumeChange(res);
+		}
+		return { ...this._volumeState };
+	}
+
+	async unMuteTrack(): Promise<VolumeState> {
+		const res = await this.executeCommand<VolumeState>("unMute");
+		if (res && typeof res.volume === "number") {
+			this.onVolumeChange(res);
+		}
+		return { ...this._volumeState };
+	}
+
+	async toggleMuteTrack(): Promise<VolumeState> {
+		const res = await this.executeCommand<VolumeState>("toggleMute");
+		if (res && typeof res.volume === "number") {
+			this.onVolumeChange(res);
+		}
+		return { ...this._volumeState };
 	}
 
 	async forwardTrack(_ev: unknown, data?: { time?: number }): Promise<TrackControlResponse> {
@@ -1147,6 +1209,18 @@ export class TrackService {
 			if (this._trackState) emit.next({ ...this._trackState });
 			return () => {
 				events.off("track:state-change", handler);
+			};
+		});
+	}
+
+	/** tRPC subscription — service EventEmitter, not ipcMain. */
+	subscribeVolume() {
+		return observable<VolumeState>((emit) => {
+			const handler = (state: VolumeState) => emit.next({ ...state });
+			events.on("track:volume-change", handler);
+			if (this._volumeState) emit.next({ ...this._volumeState });
+			return () => {
+				events.off("track:volume-change", handler);
 			};
 		});
 	}

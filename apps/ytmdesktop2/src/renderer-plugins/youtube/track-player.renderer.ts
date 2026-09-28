@@ -1,6 +1,6 @@
 import type { PlayerApi } from "ytm-client-api";
-import type { RendererPluginRegistration } from "./world0/types";
 import { getPagePlayerApi } from "./world0/context";
+import type { RendererPluginRegistration } from "./world0/types";
 
 type PlayerEventTarget = {
 	addEventListener?: (event: string, handler: (...args: never[]) => void) => void;
@@ -259,6 +259,67 @@ const trackPlayerRenderer: RendererPluginRegistration = {
 		let lastPlaying: boolean | null = null;
 		let lastProgressBucket = -1;
 		let hookedPlayPlayer: PlayerApi | null = null;
+		let lastVolume: number | null = null;
+		let lastMuted: boolean | null = null;
+		let hookedVideoEl: HTMLVideoElement | null = null;
+
+		const emitVolume = (force = false) => {
+			const player = getPagePlayerApi() ?? playerApi;
+			const video = typeof document !== "undefined" ? document.querySelector<HTMLVideoElement>("video") : null;
+			if (!player && !video) return;
+			let volume = 0;
+			let muted = false;
+			try {
+				if (player && typeof player.getVolume === "function") {
+					volume = Math.round(Number(player.getVolume()));
+					muted = Boolean(player.isMuted?.() ?? false);
+				} else if (video) {
+					volume = Math.round(video.volume * 100);
+					muted = video.muted;
+				}
+			} catch {
+				return;
+			}
+			if (!force && volume === lastVolume && muted === lastMuted) return;
+			lastVolume = volume;
+			lastMuted = muted;
+			ctx.ytmd?.emit("track:volume", { volume, muted });
+		};
+
+		const onVolumeChange = () => {
+			emitVolume();
+		};
+
+		const onSliderInput = (e: Event) => {
+			const target = e.target as HTMLElement | null;
+			if (target?.closest?.("#volume-slider, ytmusic-player-bar")) {
+				emitVolume();
+			}
+		};
+
+		if (typeof document !== "undefined") {
+			document.addEventListener("volumechange", onVolumeChange, true);
+			document.addEventListener("input", onSliderInput, true);
+			document.addEventListener("change", onSliderInput, true);
+		}
+
+		const hookVideoElement = () => {
+			const video = document.querySelector<HTMLVideoElement>("video");
+			if (!video || video === hookedVideoEl) return;
+			if (hookedVideoEl) {
+				try {
+					hookedVideoEl.removeEventListener("volumechange", onVolumeChange);
+				} catch {
+					/* ignore */
+				}
+			}
+			hookedVideoEl = video;
+			try {
+				hookedVideoEl.addEventListener("volumechange", onVolumeChange);
+			} catch {
+				/* ignore */
+			}
+		};
 
 		const clearAlbumPoll = () => {
 			if (albumPollTimer === null) return;
@@ -366,6 +427,7 @@ const trackPlayerRenderer: RendererPluginRegistration = {
 			const player = getPagePlayerApi() ?? playerApi;
 			if (!player) return;
 			emitPlayState("track:play-state-progress", isPlaying(player), progress);
+			emitVolume();
 		};
 
 		const onStateChange = () => {
@@ -378,6 +440,7 @@ const trackPlayerRenderer: RendererPluginRegistration = {
 				/* ignore */
 			}
 			emitPlayState("track:play-state", isPlaying(player), time);
+			emitVolume();
 		};
 
 		const hookPlayPlayer = () => {
@@ -387,6 +450,7 @@ const trackPlayerRenderer: RendererPluginRegistration = {
 			try {
 				prev?.removeEventListener?.("onVideoProgress", onProgress as (...args: never[]) => void);
 				prev?.removeEventListener?.("onStateChange", onStateChange as (...args: never[]) => void);
+				prev?.removeEventListener?.("onVolumeChange", onVolumeChange as (...args: never[]) => void);
 			} catch {
 				/* ignore */
 			}
@@ -395,9 +459,12 @@ const trackPlayerRenderer: RendererPluginRegistration = {
 				const next = asEventTarget(player);
 				next?.addEventListener?.("onVideoProgress", onProgress as (...args: never[]) => void);
 				next?.addEventListener?.("onStateChange", onStateChange as (...args: never[]) => void);
+				next?.addEventListener?.("onVolumeChange", onVolumeChange as (...args: never[]) => void);
 			} catch {
 				/* ignore */
 			}
+			hookVideoElement();
+			emitVolume(true);
 			return true;
 		};
 
@@ -408,6 +475,7 @@ const trackPlayerRenderer: RendererPluginRegistration = {
 			if (disposed) return;
 			hookInfoPlayer();
 			hookPlayPlayer();
+			emitVolume();
 			if (pushTrackInfo()) return;
 			if (Date.now() - startedAt >= FIRST_TRACK_POLL_MAX_MS) return;
 			firstPollTimer = setTimeout(pollFirst, FIRST_TRACK_POLL_MS);
@@ -419,6 +487,15 @@ const trackPlayerRenderer: RendererPluginRegistration = {
 			if (firstPollTimer !== null) clearTimeout(firstPollTimer);
 			clearAlbumPoll();
 			try {
+				if (typeof document !== "undefined") {
+					document.removeEventListener("volumechange", onVolumeChange, true);
+					document.removeEventListener("input", onSliderInput, true);
+					document.removeEventListener("change", onSliderInput, true);
+				}
+				if (hookedVideoEl) {
+					hookedVideoEl.removeEventListener("volumechange", onVolumeChange);
+					hookedVideoEl = null;
+				}
 				asEventTarget(hookedInfoPlayer)?.removeEventListener?.(
 					"onVideoDataChange",
 					handleVideoDataChange as (...args: never[]) => void,
@@ -430,6 +507,10 @@ const trackPlayerRenderer: RendererPluginRegistration = {
 				asEventTarget(hookedPlayPlayer)?.removeEventListener?.(
 					"onStateChange",
 					onStateChange as (...args: never[]) => void,
+				);
+				asEventTarget(hookedPlayPlayer)?.removeEventListener?.(
+					"onVolumeChange",
+					onVolumeChange as (...args: never[]) => void,
 				);
 			} catch {
 				/* ignore */

@@ -19,6 +19,7 @@ import SettingsIcon from "@/assets/icons/settings.svg?react";
 import { TrayLyricsDisplay } from "@/components/tray-lyrics/TrayLyricsDisplay";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { VolumeControl } from "@/components/VolumeControl";
 import { useDiscord } from "@/hooks/use-discord";
 import { useLastFm } from "@/hooks/use-lastfm";
 import { useLyrics } from "@/hooks/use-lyrics";
@@ -602,6 +603,9 @@ function TrayViewPage() {
 							<GripVerticalIcon className="size-3.5" />
 							<span className="text-[10px] font-semibold tracking-wide">DRAG</span>
 						</span>
+						<div className="h-3 w-px bg-border/40" />
+						<VolumeControl ariaLabel="Overlay Volume Control" />
+						<div className="h-3 w-px bg-border/40" />
 						<button
 							type="button"
 							className="rounded-full bg-accent/20 px-2.5 py-0.5 text-[10px] font-semibold text-accent-foreground hover:bg-accent/30"
@@ -848,8 +852,8 @@ function TrayViewPage() {
 							<span className="w-9 shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">{time?.end ?? "0:00"}</span>
 						</div>
 
-						{/* Transport — segmented dock */}
-						<div className="mt-auto flex justify-center pt-2">
+						{/* Transport + Volume row */}
+						<div className="mt-auto flex items-center justify-between gap-1.5 pt-2">
 							<div className="flex items-center gap-0.5 rounded-full border border-border/50 bg-background/50 p-1 shadow-sm backdrop-blur-md">
 								{hasLike ? (
 									<PlayerButton
@@ -903,6 +907,10 @@ function TrayViewPage() {
 										<LikeIcon className="rotate-180" />
 									</PlayerButton>
 								) : null}
+							</div>
+
+							<div className="flex items-center rounded-full border border-border/50 bg-background/50 px-2 py-1 shadow-sm backdrop-blur-md">
+								<VolumeControl sliderWidth="w-16" showPercentage={true} ariaLabel="Tray Volume Control" />
 							</div>
 						</div>
 					</div>

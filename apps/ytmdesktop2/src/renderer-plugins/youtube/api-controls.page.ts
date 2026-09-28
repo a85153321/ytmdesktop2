@@ -34,6 +34,9 @@ export const apiControlsPage = definePageCmds({
 			trackControls.volumeUp(requirePlayer(), data as Parameters<typeof trackControls.volumeUp>[1]),
 		volumeDown: (data) =>
 			trackControls.volumeDown(requirePlayer(), data as Parameters<typeof trackControls.volumeDown>[1]),
+		mute: () => trackControls.mute(requirePlayer()),
+		unMute: () => trackControls.unMute(requirePlayer()),
+		toggleMute: () => trackControls.toggleMute(requirePlayer()),
 		navigate: (data) => trackControls.navigate(data as Parameters<typeof trackControls.navigate>[0]),
 		queueAdd: (data) => trackControls.queueAdd(data as Parameters<typeof trackControls.queueAdd>[0]),
 		queueList: () => trackControls.queueList(),

@@ -114,6 +114,43 @@ async function waitLike(videoId: string | null, pred: (s: YtmLikeStatus) => bool
 	return fallback;
 }
 
+function syncPlayerBarUi(volume: number, muted: boolean): void {
+	if (typeof document === "undefined") return;
+	try {
+		const slider = document.querySelector<HTMLElement & { value?: number; immediateValue?: number }>(
+			"ytmusic-player-bar #volume-slider, #volume-slider",
+		);
+		if (slider) {
+			if ("value" in slider) slider.value = volume;
+			if ("immediateValue" in slider) slider.immediateValue = volume;
+			slider.setAttribute("value", String(volume));
+			slider.setAttribute("aria-valuenow", String(volume));
+			slider.dispatchEvent(new CustomEvent("value-change", { detail: { value: volume }, bubbles: true }));
+		}
+		const playerBar =
+			(typeof window !== "undefined" &&
+				(window as unknown as { __YTMD_HOOK__?: { ytmPlayerBar?: Record<string, unknown> } })?.__YTMD_HOOK__
+					?.ytmPlayerBar) ??
+			(document.querySelector("ytmusic-player-bar") as Record<string, unknown> | null);
+		if (playerBar) {
+			if ("volume_" in playerBar) playerBar.volume_ = volume;
+			if ("muted_" in playerBar) playerBar.muted_ = muted;
+		}
+		const video = document.querySelector<HTMLVideoElement>("video");
+		if (video) {
+			const targetVol = volume / 100;
+			if (Math.abs(video.volume - targetVol) > 0.01) {
+				video.volume = targetVol;
+			}
+			if (video.muted !== muted) {
+				video.muted = muted;
+			}
+		}
+	} catch {
+		/* ignore */
+	}
+}
+
 export const trackControls = {
 	toggle: (player: PlayerApi) => {
 		const playing = isPlayingState(player);
@@ -181,21 +218,48 @@ export const trackControls = {
 	},
 	volume: (playerApi: PlayerApi, data?: { volume?: number }) => {
 		if (typeof data?.volume === "number" && Number.isFinite(data.volume)) {
-			playerApi.setVolume(Math.max(0, Math.min(100, data.volume)));
+			const clamped = Math.max(0, Math.min(100, data.volume));
+			playerApi.setVolume(clamped);
+			if (clamped > 0 && playerApi.isMuted?.()) {
+				playerApi.unMute?.();
+			}
+			const muted = clamped === 0 ? true : Boolean(playerApi.isMuted?.() ?? false);
+			syncPlayerBarUi(clamped, muted);
 		}
-		return { volume: playerApi.getVolume() };
+		return { volume: playerApi.getVolume(), muted: playerApi.isMuted?.() ?? false };
 	},
 	volumeUp: (playerApi: PlayerApi, data?: { amount?: number }) => {
 		const amount = typeof data?.amount === "number" && Number.isFinite(data.amount) ? data.amount : 5;
 		const next = Math.min(100, Number(playerApi.getVolume() ?? 0) + Math.abs(amount));
-		playerApi.setVolume(next);
-		return { volume: playerApi.getVolume() };
+		return trackControls.volume(playerApi, { volume: next });
 	},
 	volumeDown: (playerApi: PlayerApi, data?: { amount?: number }) => {
 		const amount = typeof data?.amount === "number" && Number.isFinite(data.amount) ? data.amount : 5;
 		const next = Math.max(0, Number(playerApi.getVolume() ?? 0) - Math.abs(amount));
-		playerApi.setVolume(next);
-		return { volume: playerApi.getVolume() };
+		return trackControls.volume(playerApi, { volume: next });
+	},
+	mute: (playerApi: PlayerApi) => {
+		playerApi.mute?.();
+		const vol = Number(playerApi.getVolume() ?? 0);
+		syncPlayerBarUi(vol, true);
+		return { volume: vol, muted: playerApi.isMuted?.() ?? true };
+	},
+	unMute: (playerApi: PlayerApi) => {
+		playerApi.unMute?.();
+		const vol = Number(playerApi.getVolume() ?? 0);
+		syncPlayerBarUi(vol, false);
+		return { volume: vol, muted: playerApi.isMuted?.() ?? false };
+	},
+	toggleMute: (playerApi: PlayerApi) => {
+		const willMute = !(playerApi.isMuted?.() ?? false);
+		if (willMute) {
+			playerApi.mute?.();
+		} else {
+			playerApi.unMute?.();
+		}
+		const vol = Number(playerApi.getVolume() ?? 0);
+		syncPlayerBarUi(vol, willMute);
+		return { volume: vol, muted: playerApi.isMuted?.() ?? willMute };
 	},
 	/**
 	 * In-page YTM navigation via `yt-navigate`.
