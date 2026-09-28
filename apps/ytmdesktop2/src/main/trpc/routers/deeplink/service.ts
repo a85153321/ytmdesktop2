@@ -1,10 +1,10 @@
+import path from "node:path";
 import { AfterInit, BaseProvider, BeforeStart } from "@main/core/baseProvider";
 import { emitAppToast } from "@main/lib/appToast";
 import { createAppDialogWindow } from "@main/windows/windowUtils";
-import { type YtmdParsed, YtmdLink } from "@shared/protocol/ytmdProtocol";
+import { YtmdLink, type YtmdParsed } from "@shared/protocol/ytmdProtocol";
 import { stripUndefined } from "@shared/utils/object";
 import { App, BrowserWindow } from "electron";
-import path from "node:path";
 
 type DeeplinkAction = "close" | "play" | "queue" | "open";
 
@@ -226,18 +226,19 @@ export default class DeeplinkProvider extends BaseProvider implements BeforeStar
 
 	private register() {
 		try {
+			const scheme = "ytmd-lyrics";
 			if (process.defaultApp) {
 				if (process.argv.length >= 2) {
-					this.logger.info(`register ${YtmdLink.scheme} (dev)`);
-					this._app.setAsDefaultProtocolClient(YtmdLink.scheme, process.execPath, [
+					this.logger.info(`register ${scheme} (dev)`);
+					this._app.setAsDefaultProtocolClient(scheme, process.execPath, [
 						path.resolve(process.argv[1]!),
 					]);
 				}
 				return;
 			}
-			if (!this._app.isDefaultProtocolClient(YtmdLink.scheme)) {
-				this.logger.info(`register ${YtmdLink.scheme}`);
-				this._app.setAsDefaultProtocolClient(YtmdLink.scheme);
+			if (!this._app.isDefaultProtocolClient(scheme)) {
+				this.logger.info(`register ${scheme}`);
+				this._app.setAsDefaultProtocolClient(scheme);
 			}
 		} catch (err) {
 			this.logger.error("protocol register failed", err);

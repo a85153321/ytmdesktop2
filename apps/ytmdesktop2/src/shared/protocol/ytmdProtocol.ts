@@ -79,12 +79,12 @@ export class YtmdLink {
 	}
 
 	/**
-	 * Parse `ytmd://` or raw `https://` music/youtube/youtu.be URL into a link.
+	 * Parse `ytmd://`, `ytmd-lyrics://` or raw `https://` music/youtube/youtu.be URL into a link.
 	 * Prefer for API `/nav/open` and tools that may pass either form.
 	 */
 	static resolve(url: string): YtmdParsed | null {
 		const raw = YtmdLink.unquote(url);
-		if (/^ytmd:\/\//i.test(raw)) return YtmdLink.parse(raw);
+		if (/^ytmd(-lyrics)?:\/\//i.test(raw)) return YtmdLink.parse(raw);
 		const asYtmd = YtmdLink.fromHttps(raw);
 		return asYtmd ? YtmdLink.parse(asYtmd) : null;
 	}
@@ -96,7 +96,7 @@ export class YtmdLink {
 	 */
 	static parse(url: string): YtmdParsed | null {
 		const raw = YtmdLink.unquote(url);
-		if (!/^ytmd:\/\//i.test(raw)) return null;
+		if (!/^ytmd(-lyrics)?:\/\//i.test(raw)) return null;
 
 		let parsed: URL;
 		try {
@@ -104,7 +104,8 @@ export class YtmdLink {
 		} catch {
 			return null;
 		}
-		if (parsed.protocol.toLowerCase() !== `${YtmdLink.scheme}:`) return null;
+		const proto = parsed.protocol.toLowerCase();
+		if (proto !== "ytmd:" && proto !== "ytmd-lyrics:") return null;
 
 		if (YtmdLink.isMusicHost(parsed.hostname)) {
 			return YtmdLink.parsePathHostUrl(parsed);
@@ -152,12 +153,12 @@ export class YtmdLink {
 		return null;
 	}
 
-	/** First `ytmd://…` in process/second-instance argv. */
+	/** First `ytmd://…` or `ytmd-lyrics://…` in process/second-instance argv. */
 	static fromArgv(argv: readonly string[]): string | null {
 		for (const arg of argv) {
 			if (typeof arg !== "string") continue;
 			const cleaned = YtmdLink.unquote(arg);
-			if (/^ytmd:\/\//i.test(cleaned)) return cleaned;
+			if (/^ytmd(-lyrics)?:\/\//i.test(cleaned)) return cleaned;
 		}
 		return null;
 	}

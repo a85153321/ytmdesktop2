@@ -6,8 +6,8 @@ import { isDevelopment, isProduction } from "@main/infra/devUtils";
 import SettingsProvider from "@main/trpc/routers/settings/service";
 import { createAppWindow } from "@main/windows/windowUtils";
 import { cacheWithFile } from "@shared/utils/filecache";
-import { githubRepoFetch } from "@shared/utils/github";
 import type { GithubRelease } from "@shared/utils/github";
+import { githubRepoFetch } from "@shared/utils/github";
 import type { ProgressInfo, ReleaseNoteEntry, UpdateChannel, UpdateInfo } from "@shared/utils/updater";
 import {
 	electronUpdaterChannelFor,
@@ -216,7 +216,7 @@ export default class UpdateProvider extends BaseProvider implements BeforeStart,
 	}
 
 	get isAutoUpdate() {
-		return this.settingsInstance.instance.app.autoupdate && !isDevelopment;
+		return false;
 	}
 
 	private getChannel(): UpdateChannel {
@@ -570,24 +570,9 @@ export default class UpdateProvider extends BaseProvider implements BeforeStart,
 		return true;
 	}
 
-	async onCheckUpdate(options: { showDialog?: boolean; forceDialog?: boolean } = {}) {
-		const showDialog = options.showDialog ?? true;
-		const forceDialog = options.forceDialog ?? false;
-		try {
-			const result = await this._checkUpdate();
-			if (showDialog && result.updateInfo) {
-				await this.showUpdateDialog(result.updateInfo, { force: forceDialog });
-			}
-			return result.updateInfo;
-		} catch (err: unknown) {
-			const message = err instanceof Error ? err.message : String(err);
-			try {
-				this.logger.error(message);
-			} catch {
-				/* unbound this (destructured method) */
-			}
-			return null;
-		}
+	async onCheckUpdate(_options: { showDialog?: boolean; forceDialog?: boolean } = {}) {
+		this.logger.debug("onCheckUpdate skipped — custom fork auto-update disabled");
+		return null;
 	}
 
 	onChannelChanged() {

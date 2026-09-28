@@ -1,9 +1,9 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/electron-userland/electron-builder/refs/heads/master/packages/app-builder-lib/scheme.json
 
-appId: net.venipa.ytmdesktop
-productName: YouTube Music for Desktop
+appId: net.venipa.ytmdesktop.lyrics
+productName: YouTube Music Desktop Lyrics
 extraMetadata:
-  name: YouTube Music for Desktop
+  name: ytmdesktop-lyrics
 directories:
   buildResources: build
 files:
@@ -26,11 +26,11 @@ asarUnpack:
   - "**/*.icns"
   - "**/assets/**"
 protocols:
-  - name: YouTube Music for Desktop
+  - name: YouTube Music Desktop Lyrics
     schemes:
-      - ytmd
+      - ytmd-lyrics
 win:
-  executableName: ytmdesktop
+  executableName: ytmdesktop-lyrics
   artifactName: ${name}-${version}-setup.${ext}
   compression: maximum
   target:
@@ -44,6 +44,7 @@ nsis:
   installerIcon: build/icon.ico
   installerHeaderIcon: build/icon.ico
   deleteAppDataOnUninstall: true
+  include: build/installer.nsh
 
 mac:
   entitlements: build/entitlements.mac.plist

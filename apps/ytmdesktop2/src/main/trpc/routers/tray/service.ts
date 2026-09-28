@@ -61,7 +61,7 @@ export default class TrayProvider extends BaseProvider implements AfterInit, OnD
 			}
 
 			this._tray = new Tray(icon);
-			this._tray.setToolTip("YouTube Music for Desktop");
+			this._tray.setToolTip("YouTube Music Desktop Lyrics");
 			// macOS: text keeps a visible status item if the glyph failed to load.
 			if (platform.isMacOS && icon.isEmpty()) {
 				this._tray.setTitle("YT");
