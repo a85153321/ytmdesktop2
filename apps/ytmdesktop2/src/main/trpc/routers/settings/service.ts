@@ -36,6 +36,11 @@ const defaultSettings = {
 	},
 	trayView: {
 		pinned: false,
+		overlayFontSize: "medium" as "small" | "medium" | "large" | "xlarge",
+		overlayOpacity: "100" as "50" | "75" | "90" | "100",
+		overlayShowNextLine: true,
+		overlayAlign: "center" as "left" | "center",
+		overlayHotkey: "CommandOrControl+Alt+L",
 	},
 	volumeRatio: {
 		enabled: true,

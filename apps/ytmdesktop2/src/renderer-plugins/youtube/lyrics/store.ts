@@ -1,15 +1,9 @@
 import { searchLyricsDetailed } from "./providers/search";
 import { resolveLyricsDisplay, setLyricsTabDisplayMode, ytmHasStockLyrics } from "./stock";
-import type { LyricResult, LyricsMissReason, LyricsStatus, TrackSearchInfo } from "./types";
+import type { LyricResult, LyricsMissReason, LyricsStatus, LyricsStoreSnapshot, TrackSearchInfo } from "./types";
 
-export interface LyricsStoreSnapshot {
-	status: LyricsStatus;
-	result: LyricResult | null;
-	videoId: string | null;
-	errorMessage?: string;
-	/** Why Better Lyrics came back empty (only meaningful when `status === "empty"`). */
-	betterLyricsMiss?: LyricsMissReason;
-}
+export type { LyricsStoreSnapshot };
+
 
 export interface LyricsFetchOptions {
 	showEvenIfInexact: boolean;

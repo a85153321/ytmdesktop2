@@ -1,9 +1,10 @@
+import type { LyricsStoreSnapshot } from "@plugins/youtube/lyrics/types";
 import { toAppThumbUrl } from "@shared/media/appThumbUrl";
 import { createFileRoute } from "@tanstack/react-router";
 import { cva } from "class-variance-authority";
 import { intervalToDuration } from "date-fns";
 import { clamp } from "lodash-es";
-import { ArrowLeftIcon, GripVerticalIcon, PinIcon } from "lucide-react";
+import { ArrowLeftIcon, GripVerticalIcon, LayersIcon, Mic2Icon, PinIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ButtonHTMLAttributes, type MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import ApiIcon from "@/assets/icons/chip.svg?react";
@@ -15,14 +16,18 @@ import PauseIcon from "@/assets/icons/pause.svg?react";
 import PlayIcon from "@/assets/icons/play.svg?react";
 import PrevIcon from "@/assets/icons/prev.svg?react";
 import SettingsIcon from "@/assets/icons/settings.svg?react";
+import { TrayLyricsDisplay } from "@/components/tray-lyrics/TrayLyricsDisplay";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDiscord } from "@/hooks/use-discord";
 import { useLastFm } from "@/hooks/use-lastfm";
+import { useLyrics } from "@/hooks/use-lyrics";
 import { useSettingsState } from "@/hooks/use-settings";
 import { useTrack, useTrackState } from "@/hooks/use-track";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
+
+
 
 export const Route = createFileRoute("/trayview")({
 	component: TrayViewPage,
@@ -311,6 +316,25 @@ function ControlToggle({
 function pointerInsideWindow(ev: { clientX: number; clientY: number }): boolean {
 	return ev.clientX >= 0 && ev.clientY >= 0 && ev.clientX < window.innerWidth && ev.clientY < window.innerHeight;
 }
+
+function getLyricsStatusMessage(snap: LyricsStoreSnapshot | null): string {
+	if (!snap) return "Loading lyrics…";
+	switch (snap.status) {
+		case "loading":
+			return "Loading lyrics…";
+		case "empty":
+			return "No lyrics found";
+		case "error":
+			return snap.errorMessage ? `Lyrics error: ${snap.errorMessage}` : "Failed to load lyrics";
+		case "skipped":
+			return snap.errorMessage ?? "Lyrics unavailable";
+		case "idle":
+			return "Play a song to see lyrics";
+		default:
+			return snap.result?.plain ? snap.result.plain : "No lyrics found";
+	}
+}
+
 function TrayViewPage() {
 	const utils = trpc.useUtils();
 	const track = useTrack();
@@ -320,9 +344,24 @@ function TrayViewPage() {
 	const playStateRef = useRef(playState);
 	playStateRef.current = playState;
 
+	const [viewMode, setViewMode] = useState<"player" | "lyrics">("player");
+	const lyricsSnapshot = useLyrics();
+	const lyricsLines = useMemo(() => lyricsSnapshot?.result?.lines ?? [], [lyricsSnapshot?.result?.lines]);
+
+
+
+	const { data: serverMode = "player" } = trpc.trayView.mode.useQuery();
+	const { data: clickThrough = false } = trpc.trayView.clickThrough.useQuery();
+	const { mutateAsync: setServerMode } = trpc.trayView.setMode.useMutation();
+	const { mutateAsync: setClickThrough } = trpc.trayView.setClickThrough.useMutation();
+
 	const { enabled: lastFmEnabled, toggleLastFM, lastFM, lastFMLoading, isBusy: lastFmBusy } = useLastFm();
 	const { enabled: discordEnabled, toggle: toggleDiscord, loading: discordLoading, connected: discordConnected, error: discordError } = useDiscord();
 	const [apiEnabled, setApiEnabled] = useSettingsState<boolean>("api.enabled", false);
+	const [overlayFontSize] = useSettingsState<"small" | "medium" | "large" | "xlarge">("trayView.overlayFontSize", "medium");
+	const [overlayOpacity] = useSettingsState<string>("trayView.overlayOpacity", "100");
+	const [overlayShowNextLine] = useSettingsState<boolean>("trayView.overlayShowNextLine", true);
+	const [overlayAlign] = useSettingsState<"left" | "center">("trayView.overlayAlign", "center");
 	const { data: pinned = false } = trpc.trayView.pinned.useQuery();
 	const [contentHovered, setContentHovered] = useState(false);
 	const [leftThirdHovered, setLeftThirdHovered] = useState(false);
@@ -344,6 +383,10 @@ function TrayViewPage() {
 
 	useEffect(() => {
 		document.title = "YouTube Music - Tray";
+		document.documentElement.classList.add("translucent");
+		return () => {
+			document.documentElement.classList.remove("translucent");
+		};
 	}, []);
 
 	useEffect(() => {
@@ -364,8 +407,11 @@ function TrayViewPage() {
 	trpc.trayView.onState.useSubscription(undefined, {
 		onData: (state) => {
 			if (typeof state?.pinned === "boolean") utils.trayView.pinned.setData(undefined, state.pinned);
+			if (state?.mode) utils.trayView.mode.setData(undefined, state.mode);
+			if (typeof state?.clickThrough === "boolean") utils.trayView.clickThrough.setData(undefined, state.clickThrough);
 		},
 	});
+
 
 	const thumbnail = toAppThumbUrl(track?.meta?.thumbnail);
 	const playing = !!playState?.playing;
@@ -536,6 +582,66 @@ function TrayViewPage() {
 			.finally(() => setTrackBusy(false));
 	}
 
+	if (serverMode === "overlay") {
+		return (
+			<div
+				className="absolute inset-0 flex flex-col justify-center select-none overflow-hidden bg-transparent px-8"
+				onMouseEnter={() => setContentHovered(true)}
+				onMouseLeave={() => setContentHovered(false)}
+			>
+				{/* Edit/Drag toolbar when click-through is NOT active */}
+				{!clickThrough ? (
+					<div
+						className={cn(
+							"no-drag absolute top-2 right-4 z-30 flex items-center gap-1.5 rounded-full border border-border/40 bg-background/80 px-2.5 py-1 text-xs shadow-lg backdrop-blur-md",
+							"transition-opacity duration-200",
+							contentHovered ? "opacity-100" : "opacity-40 hover:opacity-100",
+						)}
+					>
+						<span className="drag flex items-center gap-1 cursor-grab px-1 text-muted-foreground hover:text-foreground">
+							<GripVerticalIcon className="size-3.5" />
+							<span className="text-[10px] font-semibold tracking-wide">DRAG</span>
+						</span>
+						<button
+							type="button"
+							className="rounded-full bg-accent/20 px-2.5 py-0.5 text-[10px] font-semibold text-accent-foreground hover:bg-accent/30"
+							onClick={() => void setClickThrough(true)}
+							title="Lock overlay (click-through). Press Ctrl+Alt+L to unlock."
+						>
+							Lock
+						</button>
+						<button
+							type="button"
+							className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground hover:text-foreground hover:bg-foreground/10"
+							onClick={() => void setServerMode("player")}
+							title="Exit overlay to player view"
+						>
+							✕
+						</button>
+					</div>
+				) : null}
+
+				<TrayLyricsDisplay
+					lines={lyricsLines}
+					progressSec={playState?.progress ?? 0}
+					playing={playing}
+					durationSec={playState?.duration || Number(track?.meta?.duration) || 0}
+					accent={displayAccent}
+					emptyMessage={getLyricsStatusMessage(lyricsSnapshot)}
+					loading={lyricsSnapshot?.status === "loading"}
+					overlayMode={true}
+					fontSize={overlayFontSize}
+					opacity={overlayOpacity}
+					showNextLine={overlayShowNextLine}
+					align={overlayAlign}
+					onSeek={(timeMs) => {
+						void seek({ time: timeMs, type: "seek" });
+					}}
+				/>
+			</div>
+		);
+	}
+
 	return (
 		<div
 			className="absolute inset-0 flex overflow-hidden border border-border bg-background text-foreground shadow-sm"
@@ -574,6 +680,36 @@ function TrayViewPage() {
 									: "pointer-events-none -translate-y-0.5 opacity-0",
 							)}
 						>
+							<Tooltip onOpenChange={setChromeTooltipOpen}>
+								<TooltipTrigger
+									render={
+										<ChromeButton
+											aria-label={viewMode === "lyrics" ? "Player view" : "Lyrics view"}
+											aria-pressed={viewMode === "lyrics"}
+											data-active={viewMode === "lyrics" ? "true" : undefined}
+											onClick={() => setViewMode((m) => (m === "player" ? "lyrics" : "player"))}
+											className={cn("no-drag", viewMode === "lyrics" && "text-foreground bg-accent/20")}
+										>
+											<Mic2Icon className={cn(viewMode === "lyrics" && "text-accent")} />
+										</ChromeButton>
+									}
+								/>
+								<TooltipContent side="bottom">{viewMode === "lyrics" ? "Show player" : "Show lyrics"}</TooltipContent>
+							</Tooltip>
+							<Tooltip onOpenChange={setChromeTooltipOpen}>
+								<TooltipTrigger
+									render={
+										<ChromeButton
+											aria-label="Desktop Overlay"
+											onClick={() => void setServerMode("overlay")}
+											className="no-drag"
+										>
+											<LayersIcon className="size-3.5" />
+										</ChromeButton>
+									}
+								/>
+								<TooltipContent side="bottom">Desktop Overlay</TooltipContent>
+							</Tooltip>
 							<Tooltip onOpenChange={setChromeTooltipOpen}>
 								<TooltipTrigger
 									render={
@@ -617,14 +753,42 @@ function TrayViewPage() {
 							</Tooltip>
 						</div>
 
-						<div className="flex items-start gap-2.5">
-							<TrayCoverArt src={artSrc} />
+						{viewMode === "player" ? (
+							<div className="flex items-start gap-2.5">
+								<TrayCoverArt src={artSrc} />
 
-							<div className="min-w-0 flex-1 pt-0.5">
-								<p className="truncate text-base leading-tight font-semibold">{title}</p>
-								{artist ? <p className="mt-0.5 truncate text-sm text-muted-foreground">{artist}</p> : null}
+								<div className="min-w-0 flex-1 pt-0.5">
+									<p className="truncate text-base leading-tight font-semibold">{title}</p>
+									{artist ? <p className="mt-0.5 truncate text-sm text-muted-foreground">{artist}</p> : null}
+								</div>
 							</div>
-						</div>
+						) : (
+							<div className="flex min-w-0 flex-1 flex-col justify-center py-0.5">
+								<div className="flex items-center gap-1.5 min-w-0 pr-28">
+									<p className="truncate text-xs font-medium text-muted-foreground/90">
+										{title} {artist ? `· ${artist}` : ""}
+									</p>
+									{lyricsSnapshot?.result?.provider ? (
+										<span className="shrink-0 rounded bg-muted/60 px-1 py-0.5 text-[9px] text-muted-foreground font-mono">
+											{lyricsSnapshot.result.provider}
+										</span>
+									) : null}
+								</div>
+
+								<TrayLyricsDisplay
+									lines={lyricsLines}
+									progressSec={playState?.progress ?? 0}
+									playing={playing}
+									durationSec={playState?.duration || Number(track?.meta?.duration) || 0}
+									accent={displayAccent}
+									emptyMessage={getLyricsStatusMessage(lyricsSnapshot)}
+									loading={lyricsSnapshot?.status === "loading"}
+									onSeek={(timeMs) => {
+										void seek({ time: timeMs, type: "seek" });
+									}}
+								/>
+							</div>
+						)}
 
 						{/* Progress + duration */}
 						<div className="mt-3 flex items-center gap-2">

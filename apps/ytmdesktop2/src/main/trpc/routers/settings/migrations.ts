@@ -194,6 +194,45 @@ const migrations: Omit<Migration<SettingsStore>, "version">[] = [
 			if (typeof current.lineBackground !== "boolean") store.set("lyrics.lineBackground", true);
 		},
 	},
+	{
+		hook(store) {
+			const current = (store.store as SettingsStore)?.trayView as
+				| (SettingsStore["trayView"] & {
+						overlayFontSize?: unknown;
+						overlayOpacity?: unknown;
+						overlayShowNextLine?: unknown;
+						overlayAlign?: unknown;
+						overlayHotkey?: unknown;
+				  })
+				| undefined;
+			if (!current) return;
+			if (
+				current.overlayFontSize !== "small" &&
+				current.overlayFontSize !== "medium" &&
+				current.overlayFontSize !== "large" &&
+				current.overlayFontSize !== "xlarge"
+			) {
+				store.set("trayView.overlayFontSize", "medium");
+			}
+			if (
+				current.overlayOpacity !== "50" &&
+				current.overlayOpacity !== "75" &&
+				current.overlayOpacity !== "90" &&
+				current.overlayOpacity !== "100"
+			) {
+				store.set("trayView.overlayOpacity", "100");
+			}
+			if (typeof current.overlayShowNextLine !== "boolean") {
+				store.set("trayView.overlayShowNextLine", true);
+			}
+			if (current.overlayAlign !== "left" && current.overlayAlign !== "center") {
+				store.set("trayView.overlayAlign", "center");
+			}
+			if (typeof current.overlayHotkey !== "string" || !current.overlayHotkey.trim()) {
+				store.set("trayView.overlayHotkey", "CommandOrControl+Alt+L");
+			}
+		},
+	},
 ];
 
 export default migrations;

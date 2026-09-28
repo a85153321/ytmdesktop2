@@ -63,6 +63,15 @@ export type LyricsStatus = "idle" | "loading" | "ready" | "empty" | "error" | "s
  */
 export type LyricsMissReason = "not-found" | "uncached" | "invalid-key" | "rate-limited";
 
+export interface LyricsStoreSnapshot {
+	status: LyricsStatus;
+	result: LyricResult | null;
+	videoId: string | null;
+	errorMessage?: string;
+	/** Why Better Lyrics came back empty (only meaningful when `status === "empty"`). */
+	betterLyricsMiss?: LyricsMissReason;
+}
+
 export interface LyricsViewState {
 	status: LyricsStatus;
 	result: LyricResult | null;
@@ -71,3 +80,4 @@ export interface LyricsViewState {
 	errorMessage?: string;
 	showTimeCodes: boolean;
 }
+

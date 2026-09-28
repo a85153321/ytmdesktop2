@@ -221,6 +221,11 @@ async function startLyrics() {
 	runtime.unsubStore = runtime.store.subscribe((snap) => {
 		runtime.renderer?.setSnapshot(snap);
 		maybeAutoOpenTab(snap);
+		try {
+			getYtmd().sendInternal("lyrics:snapshot", snap);
+		} catch (err) {
+			runtime.log?.debug("lyrics: failed to send snapshot to main", err);
+		}
 	});
 	runtime.unsubSettings =
 		runtime.onSettingsChange?.((key) => {
@@ -262,6 +267,15 @@ function stopLyrics() {
 	runtime.mount?.destroy();
 	runtime.mount = null;
 	runtime.store.clear();
+	try {
+		getYtmd().sendInternal("lyrics:snapshot", {
+			status: "idle",
+			result: null,
+			videoId: null,
+		});
+	} catch {
+		/* ignore */
+	}
 }
 
 export default definePlugin(
@@ -293,6 +307,10 @@ export default definePlugin(
 				log.debug("lyrics cmd disable");
 				stopLyrics();
 			},
+			async getSnapshot() {
+				return runtime.store.getSnapshot();
+			},
 		},
+
 	},
 );

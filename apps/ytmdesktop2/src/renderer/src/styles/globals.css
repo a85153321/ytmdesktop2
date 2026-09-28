@@ -57,8 +57,10 @@
 	}
 
 	html.translucent,
-	html.translucent body {
-		@apply bg-transparent;
+	html.translucent body,
+	html.translucent #app {
+		background: transparent !important;
+		background-color: transparent !important;
 	}
   * {
     @apply border-border outline-ring/50;

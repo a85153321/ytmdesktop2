@@ -28,6 +28,8 @@ export type WindowOptions = {
 	type?: Electron.BrowserWindowConstructorOptions["type"];
 	/** Open detached DevTools (defaults to true in development). */
 	devtools?: boolean;
+	transparent?: boolean;
+	backgroundColor?: string;
 };
 const log = createLogger("main");
 export function parseScriptPath(p: string) {
@@ -257,9 +259,25 @@ export function shortcutOnWindow(
 }
 
 export async function createAppWindow(appOptions?: Partial<WindowOptions>) {
-	// eslint-disable-next-line prefer-const
-	let { parent, path, minHeight, minWidth, maxHeight, maxWidth, height, width, top, showTaskBar, minimizeable, maximizeable, show, type, devtools } =
-		appOptions ?? {};
+	let {
+		parent,
+		path,
+		minHeight,
+		minWidth,
+		maxHeight,
+		maxWidth,
+		height,
+		width,
+		top,
+		showTaskBar,
+		minimizeable,
+		maximizeable,
+		show,
+		type,
+		devtools,
+		transparent,
+		backgroundColor,
+	} = appOptions ?? {};
 	if (!path) path = "/";
 	const shouldShow = show ?? true;
 	const shouldOpenDevtools = devtools ?? (isDevelopment || isProdDebug);
@@ -274,7 +292,10 @@ export async function createAppWindow(appOptions?: Partial<WindowOptions>) {
 		show: false,
 		minimizable: minimizeable === true,
 		maximizable: maximizeable === true,
-		backgroundColor: "#000000",
+		backgroundColor: transparent ? (backgroundColor ?? "#00000000") : (backgroundColor ?? "#000000"),
+		transparent: transparent === true,
+		hasShadow: transparent ? false : undefined,
+
 		fullscreenable: !maxWidth && !maxHeight,
 		icon: appIconPath,
 		frame: false,

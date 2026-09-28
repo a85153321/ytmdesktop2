@@ -30,6 +30,41 @@ const LINE_STYLE_OPTIONS: SettingsSelectOption[] = [
 	},
 ];
 
+const OVERLAY_FONT_SIZE_OPTIONS: SettingsSelectOption[] = [
+	{
+		value: "small",
+		label: "Small",
+		description: "Compact text size suitable for low resolutions or minimal distraction.",
+	},
+	{
+		value: "medium",
+		label: "Medium (Default)",
+		description: "Balanced size for comfortable reading across games and apps.",
+	},
+	{
+		value: "large",
+		label: "Large",
+		description: "Prominent lyrics display for higher resolution screens.",
+	},
+	{
+		value: "xlarge",
+		label: "Extra Large",
+		description: "Maximum readability across big displays or couch listening.",
+	},
+];
+
+const OVERLAY_OPACITY_OPTIONS: SettingsSelectOption[] = [
+	{ value: "100", label: "100%", description: "Fully opaque text and drop shadows." },
+	{ value: "90", label: "90%", description: "Slight translucency." },
+	{ value: "75", label: "75%", description: "Subtle translucent HUD." },
+	{ value: "50", label: "50%", description: "High transparency for playing intensive games." },
+];
+
+const OVERLAY_ALIGN_OPTIONS: SettingsSelectOption[] = [
+	{ value: "center", label: "Centered (Default)", description: "Lyrics lines are centered on the overlay HUD." },
+	{ value: "left", label: "Left aligned", description: "Lyrics lines are aligned to the left." },
+];
+
 function LyricsSettingsPage() {
 	const [lyricsEnabled] = useSettingsState<boolean>("lyrics.enabled", false);
 
@@ -97,6 +132,60 @@ function LyricsSettingsPage() {
 							label="Highlight style"
 							description="How the current line shows progress. Text fill needs word/syllable timing from the provider; line timing only says when a line starts, not how fast it's sung, so those songs get a plain highlight or the constant-rate bar."
 							options={LINE_STYLE_OPTIONS}
+						/>
+					</FieldGroup>
+				</CardContent>
+			</Card>
+			<Card>
+				<CardHeader>
+					<CardTitle>Desktop Lyrics Overlay</CardTitle>
+					<CardDescription>
+						Floating transparent HUD lyrics displayed directly on your desktop or over fullscreen borderless games.
+						Switch to overlay from the tray view or use the global shortcut.
+					</CardDescription>
+				</CardHeader>
+				<CardContent>
+					<FieldGroup>
+						<SettingsSelect
+							configKey="trayView.overlayFontSize"
+							defaultValue="medium"
+							label="Font size"
+							description="Size of active and upcoming lyric lines in the desktop overlay."
+							options={OVERLAY_FONT_SIZE_OPTIONS}
+						/>
+						<SettingsSelect
+							configKey="trayView.overlayOpacity"
+							defaultValue="100"
+							label="Opacity"
+							description="Text opacity and brightness of the floating HUD."
+							options={OVERLAY_OPACITY_OPTIONS}
+						/>
+						<SettingsSelect
+							configKey="trayView.overlayAlign"
+							defaultValue="center"
+							label="Text alignment"
+							description="Horizontal alignment of lyric lines."
+							options={OVERLAY_ALIGN_OPTIONS}
+						/>
+						<SettingsCheckbox
+							configKey="trayView.overlayShowNextLine"
+							defaultValue={true}
+							description="Display a preview of the upcoming line beneath the current line."
+						>
+							Show upcoming line preview
+						</SettingsCheckbox>
+						<SettingsInput
+							configKey="trayView.overlayHotkey"
+							defaultValue="CommandOrControl+Alt+L"
+							autoComplete="off"
+							spellCheck={false}
+							label="Global shortcut"
+							hint={
+								<>
+									Toggle Desktop Lyrics Overlay or toggle click-through lock/unlock while active (e.g.{" "}
+									<code>CommandOrControl+Alt+L</code>).
+								</>
+							}
 						/>
 					</FieldGroup>
 				</CardContent>

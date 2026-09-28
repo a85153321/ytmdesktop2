@@ -2,6 +2,7 @@ import { BaseProvider } from "@main/core/baseProvider";
 import { serverMain } from "@main/ipc/serverEvents";
 import AppProvider from "@main/trpc/routers/app/service";
 import SettingsProvider from "@main/trpc/routers/settings/service";
+import TrayViewProvider from "@main/trpc/routers/trayView/service";
 import translations from "@translations/index";
 import { Menu, shell } from "electron";
 
@@ -10,7 +11,9 @@ export const createTrayMenu = (provider: BaseProvider) => {
 	const { instance: sp } = settings;
 	const appProvider = provider.getProvider("app") as AppProvider;
 	const { app } = appProvider;
+	const trayView = provider.getProvider("trayView") as TrayViewProvider;
 	const update = provider.getProvider("update");
+
 	const menu = Menu.buildFromTemplate([
 		{
 			label: translations.appName,
@@ -52,6 +55,32 @@ export const createTrayMenu = (provider: BaseProvider) => {
 			click: (item) => {
 				settings.set("app.minimizeTrayOverride", item.checked);
 			},
+		},
+		{
+			type: "separator",
+		},
+		{
+			type: "submenu",
+			label: "Desktop Lyrics",
+			submenu: [
+				{
+					label: "Lyrics Overlay Mode",
+					type: "checkbox",
+					checked: trayView?.mode === "overlay",
+					click: (item) => {
+						void trayView?.setMode(item.checked ? "overlay" : "player");
+					},
+				},
+				{
+					label: "Lock (Click-through)",
+					type: "checkbox",
+					enabled: trayView?.mode === "overlay",
+					checked: trayView?.isClickThrough() ?? false,
+					click: (item) => {
+						void trayView?.setClickThrough(item.checked);
+					},
+				},
+			],
 		},
 		{
 			type: "separator",
