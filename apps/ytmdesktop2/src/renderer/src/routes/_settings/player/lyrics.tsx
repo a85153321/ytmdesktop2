@@ -3,6 +3,7 @@ import { LyricsProvidersOrder } from "@/components/lyrics-providers-order";
 import { SettingsCheckbox } from "@/components/settings-checkbox";
 import { SettingsInput } from "@/components/settings-input";
 import { SettingsSelect, type SettingsSelectOption } from "@/components/settings-select";
+import { SettingsSlider } from "@/components/settings-slider";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { FieldGroup } from "@/components/ui/field";
 import { useSettingsState } from "@/hooks/use-settings";
@@ -156,9 +157,18 @@ function LyricsSettingsPage() {
 						<SettingsSelect
 							configKey="trayView.overlayOpacity"
 							defaultValue="100"
-							label="Opacity"
-							description="Text opacity and brightness of the floating HUD."
+							label="Lyrics text opacity"
+							description="Text opacity and brightness of the lyric lines."
 							options={OVERLAY_OPACITY_OPTIONS}
+						/>
+						<SettingsSlider
+							configKey="trayView.desktopOverlayBackgroundOpacity"
+							defaultValue={75}
+							min={10}
+							max={100}
+							step={5}
+							label="Background opacity"
+							description="Controls the background opacity when Desktop Overlay is enabled. Content such as artwork, text and controls remains fully opaque."
 						/>
 						<SettingsSelect
 							configKey="trayView.overlayAlign"

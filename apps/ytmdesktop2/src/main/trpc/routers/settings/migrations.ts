@@ -233,6 +233,33 @@ const migrations: Omit<Migration<SettingsStore>, "version">[] = [
 			}
 		},
 	},
+	{
+		hook(store) {
+			const current = (store.store as Record<string, any>)?.trayView;
+			if (!current) return;
+			// Backward-compatible migration from legacy `mode = "overlay"`
+			if (current.mode === "overlay") {
+				store.set("trayView.contentMode", "lyrics");
+				store.set("trayView.desktopOverlay", true);
+			} else if (current.mode === "lyrics") {
+				store.set("trayView.contentMode", "lyrics");
+				store.set("trayView.desktopOverlay", false);
+			} else if (current.mode === "player") {
+				store.set("trayView.contentMode", "player");
+				store.set("trayView.desktopOverlay", false);
+			}
+			if (current.contentMode !== "player" && current.contentMode !== "lyrics") {
+				store.set("trayView.contentMode", "player");
+			}
+			if (typeof current.desktopOverlay !== "boolean") {
+				store.set("trayView.desktopOverlay", false);
+			}
+			const opacity = current.desktopOverlayBackgroundOpacity;
+			if (typeof opacity !== "number" || !Number.isFinite(opacity) || opacity < 10 || opacity > 100) {
+				store.set("trayView.desktopOverlayBackgroundOpacity", 75);
+			}
+		},
+	},
 ];
 
 export default migrations;

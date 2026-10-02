@@ -64,17 +64,17 @@ export const createTrayMenu = (provider: BaseProvider) => {
 			label: "Desktop Lyrics",
 			submenu: [
 				{
-					label: "Lyrics Overlay Mode",
+					label: "Desktop Overlay",
 					type: "checkbox",
-					checked: trayView?.mode === "overlay",
+					checked: trayView?.isDesktopOverlay() ?? false,
 					click: (item) => {
-						void trayView?.setMode(item.checked ? "overlay" : "player");
+						void trayView?.setDesktopOverlay(item.checked);
 					},
 				},
 				{
 					label: "Lock (Click-through)",
 					type: "checkbox",
-					enabled: trayView?.mode === "overlay",
+					enabled: trayView?.isDesktopOverlay() ?? false,
 					checked: trayView?.isClickThrough() ?? false,
 					click: (item) => {
 						void trayView?.setClickThrough(item.checked);

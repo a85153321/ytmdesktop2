@@ -4,7 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { cva } from "class-variance-authority";
 import { intervalToDuration } from "date-fns";
 import { clamp } from "lodash-es";
-import { ArrowLeftIcon, GripVerticalIcon, LayersIcon, Mic2Icon, PinIcon } from "lucide-react";
+import { ArrowLeftIcon, GripVerticalIcon, LayersIcon, LockIcon, Mic2Icon, PinIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ButtonHTMLAttributes, type MouseEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import ApiIcon from "@/assets/icons/chip.svg?react";
@@ -123,7 +123,7 @@ function useAlignedArtDisplay(thumbnail: string | null | undefined, liveAccent: 
 	return display;
 }
 
-function TrayBleedArt({ src, accent }: { src: string | null; accent: string | null }) {
+function TrayBleedArt({ src, accent, opacity = 1 }: { src: string | null; accent: string | null; opacity?: number }) {
 	return (
 		<div className="pointer-events-none absolute inset-0" aria-hidden>
 			<AnimatePresence mode="wait">
@@ -156,11 +156,14 @@ function TrayBleedArt({ src, accent }: { src: string | null; accent: string | nu
 				initial={false}
 				animate={{
 					backgroundColor: accent ?? "var(--accent)",
-					opacity: accent ? 0.25 : 0,
+					opacity: accent ? 0.25 * opacity : 0,
 				}}
 				transition={{ duration: ART_DURATION, ease: ART_EASE }}
 			/>
-			<div className="absolute inset-0 bg-background/70" />
+			<div
+				className="absolute inset-0 bg-background"
+				style={{ opacity: 0.7 * opacity }}
+			/>
 		</div>
 	);
 }
@@ -336,6 +339,19 @@ function getLyricsStatusMessage(snap: LyricsStoreSnapshot | null): string {
 	}
 }
 
+type ResizeDirection = "n" | "s" | "e" | "w" | "nw" | "ne" | "sw" | "se";
+
+const RESIZE_HANDLES: { dir: ResizeDirection; className: string; cursor: string }[] = [
+	{ dir: "nw", className: "top-0 left-0 size-3 z-50 cursor-nwse-resize", cursor: "nwse-resize" },
+	{ dir: "ne", className: "top-0 right-0 size-3 z-50 cursor-nesw-resize", cursor: "nesw-resize" },
+	{ dir: "sw", className: "bottom-0 left-0 size-3 z-50 cursor-nesw-resize", cursor: "nesw-resize" },
+	{ dir: "se", className: "bottom-0 right-0 size-3 z-50 cursor-nwse-resize", cursor: "nwse-resize" },
+	{ dir: "n", className: "top-0 left-3 right-3 h-1.5 z-40 cursor-ns-resize", cursor: "ns-resize" },
+	{ dir: "s", className: "bottom-0 left-3 right-3 h-1.5 z-40 cursor-ns-resize", cursor: "ns-resize" },
+	{ dir: "w", className: "left-0 top-3 bottom-3 w-1.5 z-40 cursor-ew-resize", cursor: "ew-resize" },
+	{ dir: "e", className: "right-0 top-3 bottom-3 w-1.5 z-40 cursor-ew-resize", cursor: "ew-resize" },
+];
+
 function TrayViewPage() {
 	const utils = trpc.useUtils();
 	const track = useTrack();
@@ -345,30 +361,115 @@ function TrayViewPage() {
 	const playStateRef = useRef(playState);
 	playStateRef.current = playState;
 
-	const [viewMode, setViewMode] = useState<"player" | "lyrics">("player");
 	const lyricsSnapshot = useLyrics();
 	const lyricsLines = useMemo(() => lyricsSnapshot?.result?.lines ?? [], [lyricsSnapshot?.result?.lines]);
 
-
-
-	const { data: serverMode = "player" } = trpc.trayView.mode.useQuery();
+	const { data: serverContentMode = "player" } = trpc.trayView.contentMode.useQuery();
+	const { data: desktopOverlay = false } = trpc.trayView.desktopOverlay.useQuery();
 	const { data: clickThrough = false } = trpc.trayView.clickThrough.useQuery();
-	const { mutateAsync: setServerMode } = trpc.trayView.setMode.useMutation();
+	const { mutateAsync: setServerContentMode } = trpc.trayView.setContentMode.useMutation();
+	const { mutateAsync: setDesktopOverlay } = trpc.trayView.setDesktopOverlay.useMutation();
+	const { mutateAsync: toggleDesktopOverlay } = trpc.trayView.toggleDesktopOverlay.useMutation();
 	const { mutateAsync: setClickThrough } = trpc.trayView.setClickThrough.useMutation();
+	const { mutateAsync: setBounds } = trpc.trayView.setBounds.useMutation();
+
+	const isResizingRef = useRef(false);
+
+	const startResize = (direction: ResizeDirection, e: React.PointerEvent<HTMLDivElement>) => {
+		if (e.button !== 0 || clickThrough) return;
+		e.preventDefault();
+		e.stopPropagation();
+
+		isResizingRef.current = true;
+		const startX = e.screenX;
+		const startY = e.screenY;
+		const startWidth = window.outerWidth;
+		const startHeight = window.outerHeight;
+		const startScreenX = window.screenX;
+		const startScreenY = window.screenY;
+
+		const minW = 360;
+		const minH = 140;
+
+		const onPointerMove = (ev: PointerEvent) => {
+			if (!isResizingRef.current) return;
+			const deltaX = ev.screenX - startX;
+			const deltaY = ev.screenY - startY;
+
+			let newX = startScreenX;
+			let newY = startScreenY;
+			let newW = startWidth;
+			let newH = startHeight;
+
+			// Handle Horizontal
+			if (direction.includes("e")) {
+				newW = Math.max(minW, startWidth + deltaX);
+			} else if (direction.includes("w")) {
+				const targetW = startWidth - deltaX;
+				if (targetW >= minW) {
+					newW = targetW;
+					newX = startScreenX + deltaX;
+				} else {
+					newW = minW;
+					newX = startScreenX + (startWidth - minW);
+				}
+			}
+
+			// Handle Vertical
+			if (direction.includes("s")) {
+				newH = Math.max(minH, startHeight + deltaY);
+			} else if (direction.includes("n")) {
+				const targetH = startHeight - deltaY;
+				if (targetH >= minH) {
+					newH = targetH;
+					newY = startScreenY + deltaY;
+				} else {
+					newH = minH;
+					newY = startScreenY + (startHeight - minH);
+				}
+			}
+
+			void setBounds({
+				x: Math.round(newX),
+				y: Math.round(newY),
+				width: Math.round(newW),
+				height: Math.round(newH),
+			});
+		};
+
+		const onPointerUp = () => {
+			isResizingRef.current = false;
+			window.removeEventListener("pointermove", onPointerMove);
+			window.removeEventListener("pointerup", onPointerUp);
+			window.removeEventListener("pointercancel", onPointerUp);
+		};
+
+		window.addEventListener("pointermove", onPointerMove);
+		window.addEventListener("pointerup", onPointerUp);
+		window.addEventListener("pointercancel", onPointerUp);
+	};
 
 	const { enabled: lastFmEnabled, toggleLastFM, lastFM, lastFMLoading, isBusy: lastFmBusy } = useLastFm();
 	const { enabled: discordEnabled, toggle: toggleDiscord, loading: discordLoading, connected: discordConnected, error: discordError } = useDiscord();
 	const [apiEnabled, setApiEnabled] = useSettingsState<boolean>("api.enabled", false);
 	const [overlayFontSize] = useSettingsState<"small" | "medium" | "large" | "xlarge">("trayView.overlayFontSize", "medium");
 	const [overlayOpacity] = useSettingsState<string>("trayView.overlayOpacity", "100");
+	const [rawBgOpacity] = useSettingsState<number>("trayView.desktopOverlayBackgroundOpacity", 75);
 	const [overlayShowNextLine] = useSettingsState<boolean>("trayView.overlayShowNextLine", true);
 	const [overlayAlign] = useSettingsState<"left" | "center">("trayView.overlayAlign", "center");
 	const { data: pinned = false } = trpc.trayView.pinned.useQuery();
+
+	const bgOpacityPercent =
+		typeof rawBgOpacity === "number" && Number.isFinite(rawBgOpacity)
+			? Math.max(10, Math.min(100, rawBgOpacity))
+			: 75;
+	const bgAlpha = bgOpacityPercent / 100;
+
 	const [contentHovered, setContentHovered] = useState(false);
 	const [leftThirdHovered, setLeftThirdHovered] = useState(false);
 	const [chromeTooltipOpen, setChromeTooltipOpen] = useState(false);
 	/** Portaled tooltips leave the tray DOM — keep chrome up while a chrome tooltip is open. */
-	const chromeVisible = contentHovered || chromeTooltipOpen || pinned;
+	const chromeVisible = contentHovered || chromeTooltipOpen || pinned || desktopOverlay;
 
 	const { mutateAsync: next } = trpc.track.next.useMutation();
 	const { mutateAsync: prev } = trpc.track.prev.useMutation();
@@ -408,7 +509,8 @@ function TrayViewPage() {
 	trpc.trayView.onState.useSubscription(undefined, {
 		onData: (state) => {
 			if (typeof state?.pinned === "boolean") utils.trayView.pinned.setData(undefined, state.pinned);
-			if (state?.mode) utils.trayView.mode.setData(undefined, state.mode);
+			if (state?.contentMode) utils.trayView.contentMode.setData(undefined, state.contentMode);
+			if (typeof state?.desktopOverlay === "boolean") utils.trayView.desktopOverlay.setData(undefined, state.desktopOverlay);
 			if (typeof state?.clickThrough === "boolean") utils.trayView.clickThrough.setData(undefined, state.clickThrough);
 		},
 	});
@@ -583,72 +685,21 @@ function TrayViewPage() {
 			.finally(() => setTrackBusy(false));
 	}
 
-	if (serverMode === "overlay") {
-		return (
-			<div
-				className="absolute inset-0 flex flex-col justify-center select-none overflow-hidden bg-transparent px-8"
-				onMouseEnter={() => setContentHovered(true)}
-				onMouseLeave={() => setContentHovered(false)}
-			>
-				{/* Edit/Drag toolbar when click-through is NOT active */}
-				{!clickThrough ? (
-					<div
-						className={cn(
-							"no-drag absolute top-2 right-4 z-30 flex items-center gap-1.5 rounded-full border border-border/40 bg-background/80 px-2.5 py-1 text-xs shadow-lg backdrop-blur-md",
-							"transition-opacity duration-200",
-							contentHovered ? "opacity-100" : "opacity-40 hover:opacity-100",
-						)}
-					>
-						<span className="drag flex items-center gap-1 cursor-grab px-1 text-muted-foreground hover:text-foreground">
-							<GripVerticalIcon className="size-3.5" />
-							<span className="text-[10px] font-semibold tracking-wide">DRAG</span>
-						</span>
-						<div className="h-3 w-px bg-border/40" />
-						<VolumeControl ariaLabel="Overlay Volume Control" />
-						<div className="h-3 w-px bg-border/40" />
-						<button
-							type="button"
-							className="rounded-full bg-accent/20 px-2.5 py-0.5 text-[10px] font-semibold text-accent-foreground hover:bg-accent/30"
-							onClick={() => void setClickThrough(true)}
-							title="Lock overlay (click-through). Press Ctrl+Alt+L to unlock."
-						>
-							Lock
-						</button>
-						<button
-							type="button"
-							className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground hover:text-foreground hover:bg-foreground/10"
-							onClick={() => void setServerMode("player")}
-							title="Exit overlay to player view"
-						>
-							✕
-						</button>
-					</div>
-				) : null}
-
-				<TrayLyricsDisplay
-					lines={lyricsLines}
-					progressSec={playState?.progress ?? 0}
-					playing={playing}
-					durationSec={playState?.duration || Number(track?.meta?.duration) || 0}
-					accent={displayAccent}
-					emptyMessage={getLyricsStatusMessage(lyricsSnapshot)}
-					loading={lyricsSnapshot?.status === "loading"}
-					overlayMode={true}
-					fontSize={overlayFontSize}
-					opacity={overlayOpacity}
-					showNextLine={overlayShowNextLine}
-					align={overlayAlign}
-					onSeek={(timeMs) => {
-						void seek({ time: timeMs, type: "seek" });
-					}}
-				/>
-			</div>
-		);
-	}
-
 	return (
 		<div
-			className="absolute inset-0 flex overflow-hidden border border-border bg-background text-foreground shadow-sm"
+			className={cn(
+				"absolute inset-0 flex overflow-hidden select-none",
+				desktopOverlay
+					? "border border-border/40 text-foreground shadow-lg backdrop-blur-md"
+					: "border border-border bg-background text-foreground shadow-sm",
+			)}
+			style={
+				desktopOverlay
+					? {
+							backgroundColor: `color-mix(in oklab, var(--background) ${bgOpacityPercent}%, transparent)`,
+						}
+					: undefined
+			}
 			onMouseEnter={(ev) => {
 				setContentHovered(true);
 				const { left, width } = ev.currentTarget.getBoundingClientRect();
@@ -667,97 +718,132 @@ function TrayViewPage() {
 				setLeftThirdHovered(false);
 			}}
 		>
-			<TrayBleedArt src={artSrc} accent={displayAccent} />
-			<TrayAccentPill accent={displayAccent} drag={pinned} expanded={pinned && leftThirdHovered} />
+			<TrayBleedArt src={artSrc} accent={displayAccent} opacity={desktopOverlay ? bgAlpha : 1} />
+			<TrayAccentPill accent={displayAccent} drag={pinned || desktopOverlay} expanded={(pinned || desktopOverlay) && leftThirdHovered} />
 
 			<div className="no-drag relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden">
 				<div className="relative z-10 flex min-h-0 flex-1">
-					{/* Player column */}
+					{/* Main column */}
 					<div className="relative flex min-w-0 flex-1 flex-col px-3 pt-3 pb-2">
-						{/* Chrome: fade in while pointer over content (or chrome tooltip open) */}
-						<div
-							className={cn(
-								"no-drag absolute top-2 right-2 z-20 flex items-center gap-0.5 rounded-md bg-background/60 p-0.5 shadow-sm backdrop-blur-sm",
-								"transition-[opacity,transform] duration-200 ease-out",
-								chromeVisible
-									? "pointer-events-auto translate-y-0 opacity-100"
-									: "pointer-events-none -translate-y-0.5 opacity-0",
-							)}
-						>
-							<Tooltip onOpenChange={setChromeTooltipOpen}>
-								<TooltipTrigger
-									render={
-										<ChromeButton
-											aria-label={viewMode === "lyrics" ? "Player view" : "Lyrics view"}
-											aria-pressed={viewMode === "lyrics"}
-											data-active={viewMode === "lyrics" ? "true" : undefined}
-											onClick={() => setViewMode((m) => (m === "player" ? "lyrics" : "player"))}
-											className={cn("no-drag", viewMode === "lyrics" && "text-foreground bg-accent/20")}
-										>
-											<Mic2Icon className={cn(viewMode === "lyrics" && "text-accent")} />
-										</ChromeButton>
-									}
-								/>
-								<TooltipContent side="bottom">{viewMode === "lyrics" ? "Show player" : "Show lyrics"}</TooltipContent>
-							</Tooltip>
-							<Tooltip onOpenChange={setChromeTooltipOpen}>
-								<TooltipTrigger
-									render={
-										<ChromeButton
-											aria-label="Desktop Overlay"
-											onClick={() => void setServerMode("overlay")}
-											className="no-drag"
-										>
-											<LayersIcon className="size-3.5" />
-										</ChromeButton>
-									}
-								/>
-								<TooltipContent side="bottom">Desktop Overlay</TooltipContent>
-							</Tooltip>
-							<Tooltip onOpenChange={setChromeTooltipOpen}>
-								<TooltipTrigger
-									render={
-										<ChromeButton
-											aria-label={pinned ? "Unpin" : "Pin"}
-											aria-pressed={pinned}
-											data-active={pinned ? "true" : undefined}
-											onPointerDown={(ev) => {
-												if (ev.button !== 0) return;
-												ev.preventDefault();
-												ev.stopPropagation();
-												void handlePinToggle();
-											}}
-											className={cn("no-drag", pinned && "text-foreground bg-accent/20")}
-										>
-											<PinIcon className={cn(pinned && "fill-current")} />
-										</ChromeButton>
-									}
-								/>
-								<TooltipContent side="bottom">{pinned ? "Unpin" : "Pin"}</TooltipContent>
-							</Tooltip>
-							<Tooltip onOpenChange={setChromeTooltipOpen}>
-								<TooltipTrigger
-									render={
-										<ChromeButton aria-label="Back to app" onClick={() => void openMain()}>
-											<ArrowLeftIcon />
-										</ChromeButton>
-									}
-								/>
-								<TooltipContent side="bottom">Back to app</TooltipContent>
-							</Tooltip>
-							<Tooltip onOpenChange={setChromeTooltipOpen}>
-								<TooltipTrigger
-									render={
-										<ChromeButton aria-label="Settings" onClick={() => void handleSettings()}>
-											<SettingsIcon />
-										</ChromeButton>
-									}
-								/>
-								<TooltipContent side="bottom">Settings</TooltipContent>
-							</Tooltip>
-						</div>
+						{/* Chrome toolbar: fade in while pointer over content (or tooltip open, or overlay unlocked) */}
+						{!clickThrough ? (
+							<div
+								className={cn(
+									"no-drag absolute top-2 right-2 z-20 flex items-center gap-0.5 rounded-full p-1 shadow-md backdrop-blur-md",
+									desktopOverlay
+										? "border border-border/40 bg-background/80"
+										: "bg-background/60",
+									"transition-[opacity,transform] duration-200 ease-out",
+									chromeVisible
+										? "pointer-events-auto translate-y-0 opacity-100"
+										: "pointer-events-none -translate-y-0.5 opacity-0",
+								)}
+							>
+								<Tooltip onOpenChange={setChromeTooltipOpen}>
+									<TooltipTrigger
+										render={
+											<ChromeButton
+												aria-label={serverContentMode === "lyrics" ? "Player view" : "Lyrics view"}
+												aria-pressed={serverContentMode === "lyrics"}
+												data-active={serverContentMode === "lyrics" ? "true" : undefined}
+												onClick={() =>
+													void setServerContentMode(serverContentMode === "player" ? "lyrics" : "player")
+												}
+												className={cn("no-drag", serverContentMode === "lyrics" && "text-foreground bg-accent/20")}
+											>
+												<Mic2Icon className={cn(serverContentMode === "lyrics" && "text-accent")} />
+											</ChromeButton>
+										}
+									/>
+									<TooltipContent side="bottom">
+										{serverContentMode === "lyrics" ? "Show player" : "Show lyrics"}
+									</TooltipContent>
+								</Tooltip>
 
-						{viewMode === "player" ? (
+								<Tooltip onOpenChange={setChromeTooltipOpen}>
+									<TooltipTrigger
+										render={
+											<ChromeButton
+												aria-label="Desktop Overlay"
+												aria-pressed={desktopOverlay}
+												data-active={desktopOverlay ? "true" : undefined}
+												onClick={() => void toggleDesktopOverlay()}
+												className={cn("no-drag", desktopOverlay && "text-foreground bg-accent/20")}
+											>
+												<LayersIcon className={cn("size-3.5", desktopOverlay && "text-accent")} />
+											</ChromeButton>
+										}
+									/>
+									<TooltipContent side="bottom">
+										{desktopOverlay ? "Exit Desktop Overlay" : "Desktop Overlay"}
+									</TooltipContent>
+								</Tooltip>
+
+								{desktopOverlay ? (
+									<Tooltip onOpenChange={setChromeTooltipOpen}>
+										<TooltipTrigger
+											render={
+												<ChromeButton
+													aria-label="Lock (Click-through)"
+													onClick={() => void setClickThrough(true)}
+													className="no-drag text-amber-500 hover:text-amber-400"
+												>
+													<LockIcon className="size-3.5" />
+												</ChromeButton>
+											}
+										/>
+										<TooltipContent side="bottom">Lock (Click-through). Hotkey: Ctrl+Alt+L</TooltipContent>
+									</Tooltip>
+								) : null}
+
+								<Tooltip onOpenChange={setChromeTooltipOpen}>
+									<TooltipTrigger
+										render={
+											<ChromeButton
+												aria-label={pinned ? "Unpin" : "Pin"}
+												aria-pressed={pinned}
+												data-active={pinned ? "true" : undefined}
+												onPointerDown={(ev) => {
+													if (ev.button !== 0) return;
+													ev.preventDefault();
+													ev.stopPropagation();
+													void handlePinToggle();
+												}}
+												className={cn("no-drag", pinned && "text-foreground bg-accent/20")}
+											>
+												<PinIcon className={cn(pinned && "fill-current")} />
+											</ChromeButton>
+										}
+									/>
+									<TooltipContent side="bottom">{pinned ? "Unpin" : "Pin"}</TooltipContent>
+								</Tooltip>
+
+								<Tooltip onOpenChange={setChromeTooltipOpen}>
+									<TooltipTrigger
+										render={
+											<ChromeButton aria-label="Back to app" onClick={() => void openMain()}>
+												<ArrowLeftIcon />
+											</ChromeButton>
+										}
+									/>
+									<TooltipContent side="bottom">Back to app</TooltipContent>
+								</Tooltip>
+
+								<Tooltip onOpenChange={setChromeTooltipOpen}>
+									<TooltipTrigger
+										render={
+											<ChromeButton aria-label="Settings" onClick={() => void handleSettings()}>
+												<SettingsIcon />
+											</ChromeButton>
+										}
+									/>
+									<TooltipContent side="bottom">Settings</TooltipContent>
+								</Tooltip>
+							</div>
+						) : null}
+
+						{/* Content rendering: Player vs Lyrics */}
+						{serverContentMode === "player" ? (
 							<div className="flex items-start gap-2.5">
 								<TrayCoverArt src={artSrc} />
 
@@ -787,6 +873,11 @@ function TrayViewPage() {
 									accent={displayAccent}
 									emptyMessage={getLyricsStatusMessage(lyricsSnapshot)}
 									loading={lyricsSnapshot?.status === "loading"}
+									overlayMode={false}
+									fontSize={overlayFontSize}
+									opacity={overlayOpacity}
+									showNextLine={overlayShowNextLine}
+									align={overlayAlign}
 									onSeek={(timeMs) => {
 										void seek({ time: timeMs, type: "seek" });
 									}}
@@ -825,13 +916,13 @@ function TrayViewPage() {
 										...(displayAccent ? { backgroundColor: displayAccent } : {}),
 									}}
 								/>
-								{/* Hover preview — imperative width, no transition */}
+								{/* Hover preview */}
 								<div
 									ref={seekHoverFillRef}
 									className={cn("absolute inset-y-0 left-0 rounded-full bg-foreground/25", !seekHovering && "hidden")}
 									style={{ width: 0 }}
 								/>
-								{/* Scrubber thumb + tip — follow cursor via refs */}
+								{/* Scrubber thumb + tip */}
 								<div
 									ref={seekThumbRef}
 									className={cn(
@@ -854,65 +945,65 @@ function TrayViewPage() {
 
 						{/* Transport + Volume row */}
 						<div className="mt-auto flex items-center justify-between gap-1.5 pt-2">
-							<div className="flex items-center gap-0.5 rounded-full border border-border/50 bg-background/50 p-1 shadow-sm backdrop-blur-md">
-								{hasLike ? (
+								<div className="flex items-center gap-0.5 rounded-full border border-border/50 bg-background/50 p-1 shadow-sm backdrop-blur-md">
+									{hasLike ? (
+										<PlayerButton
+											active={!!playState?.liked}
+											disabled={trackBusy || !track}
+											aria-label="Like"
+											style={
+												playState?.liked && displayAccent
+													? { color: displayAccent }
+													: undefined
+											}
+											onClick={likeToggle}
+										>
+											<LikeIcon />
+										</PlayerButton>
+									) : null}
+									<PlayerButton disabled={trackBusy || !track} aria-label="Previous" onClick={handlePrev}>
+										<PrevIcon />
+									</PlayerButton>
 									<PlayerButton
-										active={!!playState?.liked}
+										variant="hero"
 										disabled={trackBusy || !track}
-										aria-label="Like"
+										aria-label={playing ? "Pause" : "Play"}
 										style={
-											playState?.liked && displayAccent
-												? { color: displayAccent }
+											displayAccent
+												? {
+														backgroundColor: `color-mix(in oklab, ${displayAccent} 28%, transparent)`,
+														color: displayAccent,
+													}
 												: undefined
 										}
-										onClick={likeToggle}
+										onClick={() => void (!playing ? play() : pause())}
 									>
-										<LikeIcon />
+										{playing ? <PauseIcon /> : <PlayIcon />}
 									</PlayerButton>
-								) : null}
-								<PlayerButton disabled={trackBusy || !track} aria-label="Previous" onClick={handlePrev}>
-									<PrevIcon />
-								</PlayerButton>
-								<PlayerButton
-									variant="hero"
-									disabled={trackBusy || !track}
-									aria-label={playing ? "Pause" : "Play"}
-									style={
-										displayAccent
-											? {
-													backgroundColor: `color-mix(in oklab, ${displayAccent} 28%, transparent)`,
-													color: displayAccent,
-												}
-											: undefined
-									}
-									onClick={() => void (!playing ? play() : pause())}
-								>
-									{playing ? <PauseIcon /> : <PlayIcon />}
-								</PlayerButton>
-								<PlayerButton disabled={trackBusy || !track} aria-label="Next" onClick={handleNext}>
-									<NextIcon />
-								</PlayerButton>
-								{hasDislike ? (
-									<PlayerButton
-										active={!!playState?.disliked}
-										disabled={trackBusy || !track}
-										aria-label="Dislike"
-										style={
-											playState?.disliked && displayAccent
-												? { color: displayAccent }
-												: undefined
-										}
-										onClick={dislikeToggle}
-									>
-										<LikeIcon className="rotate-180" />
+									<PlayerButton disabled={trackBusy || !track} aria-label="Next" onClick={handleNext}>
+										<NextIcon />
 									</PlayerButton>
-								) : null}
-							</div>
+									{hasDislike ? (
+										<PlayerButton
+											active={!!playState?.disliked}
+											disabled={trackBusy || !track}
+											aria-label="Dislike"
+											style={
+												playState?.disliked && displayAccent
+													? { color: displayAccent }
+													: undefined
+											}
+											onClick={dislikeToggle}
+										>
+											<LikeIcon className="rotate-180" />
+										</PlayerButton>
+									) : null}
+								</div>
 
-							<div className="flex items-center rounded-full border border-border/50 bg-background/50 px-2 py-1 shadow-sm backdrop-blur-md">
-								<VolumeControl sliderWidth="w-16" showPercentage={true} ariaLabel="Tray Volume Control" />
+								<div className="flex items-center rounded-full border border-border/50 bg-background/50 p-1 shadow-sm backdrop-blur-md">
+									<VolumeControl ariaLabel="Tray Volume Control" />
+								</div>
 							</div>
-						</div>
 					</div>
 
 					{/* Control center column */}
@@ -981,6 +1072,20 @@ function TrayViewPage() {
 					</div>
 				</div>
 			</div>
+
+			{/* 8-direction resize handles (only active when not click-through) */}
+			{!clickThrough ? (
+				<>
+					{RESIZE_HANDLES.map(({ dir, className, cursor }) => (
+						<div
+							key={dir}
+							className={cn("no-drag absolute select-none", className)}
+							style={{ cursor }}
+							onPointerDown={(e) => startResize(dir, e)}
+						/>
+					))}
+				</>
+			) : null}
 		</div>
 	);
 }

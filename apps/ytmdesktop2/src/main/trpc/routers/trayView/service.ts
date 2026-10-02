@@ -11,16 +11,33 @@ import { debounce } from "lodash-es";
 
 const TRAY_VIEW_WIDTH = 420;
 const TRAY_VIEW_HEIGHT = 168;
-const OVERLAY_VIEW_WIDTH = 760;
-const OVERLAY_VIEW_HEIGHT = 120;
+const MIN_TRAY_VIEW_WIDTH = 360;
+const MIN_TRAY_VIEW_HEIGHT = 140;
 
+export type ContentMode = "player" | "lyrics";
 export type TrayViewMode = "player" | "lyrics" | "overlay";
 
-function clampToVisibleWorkArea(x: number, y: number, width = TRAY_VIEW_WIDTH, height = TRAY_VIEW_HEIGHT): { x: number; y: number } {
+export interface TrayViewBounds {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
+function clampToVisibleWorkArea(
+	x: number,
+	y: number,
+	width = TRAY_VIEW_WIDTH,
+	height = TRAY_VIEW_HEIGHT,
+): TrayViewBounds {
 	const b = screen.getDisplayNearestPoint({ x, y }).workArea;
+	const clampedWidth = Math.max(MIN_TRAY_VIEW_WIDTH, Math.min(width, b.width));
+	const clampedHeight = Math.max(MIN_TRAY_VIEW_HEIGHT, Math.min(height, b.height));
 	return {
-		x: Math.round(Math.min(Math.max(x, b.x), b.x + b.width - width)),
-		y: Math.round(Math.min(Math.max(y, b.y), b.y + b.height - height)),
+		x: Math.round(Math.min(Math.max(x, b.x), b.x + b.width - clampedWidth)),
+		y: Math.round(Math.min(Math.max(y, b.y), b.y + b.height - clampedHeight)),
+		width: Math.round(clampedWidth),
+		height: Math.round(clampedHeight),
 	};
 }
 
@@ -29,12 +46,12 @@ export default class TrayViewProvider extends BaseProvider implements AfterInit,
 	private _blurHiddenAt = 0;
 	private _suppressBlurUntil = 0;
 	private _pinned = false;
-	private _mode: TrayViewMode = "player";
+	private _contentMode: ContentMode = "player";
+	private _desktopOverlay = false;
 	private _clickThrough = false;
 	private _registeredHotkey: string | null = null;
 	private _saveWindowState: (() => void) | null = null;
-	private _restoredBounds: { x: number; y: number } | null = null;
-	private _overlayBounds: { x: number; y: number; width: number; height: number } | null = null;
+	private _restoredBounds: TrayViewBounds | null = null;
 	private persistMoved = debounce(() => this._saveWindowState?.(), 250);
 	private _settingsWired = false;
 
@@ -50,12 +67,32 @@ export default class TrayViewProvider extends BaseProvider implements AfterInit,
 		return this.getProvider("tray");
 	}
 
+	get contentMode(): ContentMode {
+		return this._contentMode;
+	}
+
+	getContentMode(): ContentMode {
+		return this._contentMode;
+	}
+
+	get desktopOverlay(): boolean {
+		return this._desktopOverlay;
+	}
+
+	isDesktopOverlay(): boolean {
+		return this._desktopOverlay;
+	}
+
 	get mode(): TrayViewMode {
-		return this._mode;
+		return this._desktopOverlay ? "overlay" : this._contentMode;
 	}
 
 	isClickThrough(): boolean {
 		return this._clickThrough;
+	}
+
+	isPinned(): boolean {
+		return this._pinned;
 	}
 
 	private registerHotkey(hotkey: string) {
@@ -67,10 +104,10 @@ export default class TrayViewProvider extends BaseProvider implements AfterInit,
 			if (hotkey && hotkey.trim()) {
 				const trimmed = hotkey.trim();
 				const registered = globalShortcut.register(trimmed, () => {
-					if (this._mode === "overlay") {
+					if (this._desktopOverlay) {
 						void this.toggleClickThrough();
 					} else {
-						void this.setMode("overlay");
+						void this.setDesktopOverlay(true);
 					}
 				});
 				if (registered) {
@@ -86,12 +123,26 @@ export default class TrayViewProvider extends BaseProvider implements AfterInit,
 
 	async AfterInit() {
 		this._pinned = !!this.settings.get("trayView.pinned", false);
+		const savedContentMode = this.settings.get<ContentMode>("trayView.contentMode", "player");
+		this._contentMode = savedContentMode === "lyrics" ? "lyrics" : "player";
+		this._desktopOverlay = !!this.settings.get("trayView.desktopOverlay", false);
+
 		if (!this._settingsWired) {
 			this._settingsWired = true;
 			this.settings.onSettingChange("trayView.pinned", (value) => {
 				const pinned = !!value;
 				if (pinned === this._pinned) return;
 				this.setPinned(pinned, false);
+			});
+			this.settings.onSettingChange("trayView.contentMode", (value) => {
+				const mode = value === "lyrics" ? "lyrics" : "player";
+				if (mode === this._contentMode) return;
+				this.setContentMode(mode, false);
+			});
+			this.settings.onSettingChange("trayView.desktopOverlay", (value) => {
+				const overlay = !!value;
+				if (overlay === this._desktopOverlay) return;
+				void this.setDesktopOverlay(overlay, false);
 			});
 			this.settings.onSettingChange("trayView.overlayHotkey", (val) => {
 				if (typeof val === "string") {
@@ -108,7 +159,7 @@ export default class TrayViewProvider extends BaseProvider implements AfterInit,
 
 	private async tryRestorePinned() {
 		this._pinned = !!this.settings.get("trayView.pinned", false);
-		if (!this._pinned) return;
+		if (!this._pinned && !this._desktopOverlay) return;
 		const existing = this.getWindow();
 		if (existing?.isVisible()) return;
 		try {
@@ -144,9 +195,12 @@ export default class TrayViewProvider extends BaseProvider implements AfterInit,
 
 	private dockToTray(win: BrowserWindow) {
 		const tray = this.trayProvider?.Tray;
+		const currentBounds = win.getBounds();
+		const width = this._restoredBounds?.width ?? currentBounds.width ?? TRAY_VIEW_WIDTH;
+		const height = this._restoredBounds?.height ?? currentBounds.height ?? TRAY_VIEW_HEIGHT;
 		positionNearTray(win, tray && !tray.isDestroyed() ? tray : null, {
-			width: TRAY_VIEW_WIDTH,
-			height: TRAY_VIEW_HEIGHT,
+			width,
+			height,
 		});
 	}
 
@@ -156,18 +210,12 @@ export default class TrayViewProvider extends BaseProvider implements AfterInit,
 		if (this._ready) return this._ready;
 
 		this._ready = (async () => {
-			const isOverlay = this._mode === "overlay";
-			const initialW = isOverlay ? OVERLAY_VIEW_WIDTH : TRAY_VIEW_WIDTH;
-			const initialH = isOverlay ? OVERLAY_VIEW_HEIGHT : TRAY_VIEW_HEIGHT;
-
 			const win = await createAppWindow({
 				path: "/trayview",
-				width: initialW,
-				height: initialH,
-				minWidth: 320,
-				minHeight: 80,
-				maxWidth: 2560,
-				maxHeight: 1440,
+				width: TRAY_VIEW_WIDTH,
+				height: TRAY_VIEW_HEIGHT,
+				minWidth: MIN_TRAY_VIEW_WIDTH,
+				minHeight: MIN_TRAY_VIEW_HEIGHT,
 				show: false,
 				showTaskBar: false,
 				minimizeable: false,
@@ -177,7 +225,7 @@ export default class TrayViewProvider extends BaseProvider implements AfterInit,
 				...(platform.isMacOS ? { type: "panel" as const } : {}),
 			});
 
-			win.setResizable(isOverlay);
+			win.setResizable(true);
 			win.setMinimizable(false);
 			win.setMaximizable(false);
 			win.webContents.setBackgroundThrottling(false);
@@ -185,31 +233,26 @@ export default class TrayViewProvider extends BaseProvider implements AfterInit,
 			const { state, saveState, restored } = await wrapWindowHandler(win, "trayview", {
 				width: TRAY_VIEW_WIDTH,
 				height: TRAY_VIEW_HEIGHT,
-				persist: () => this._pinned && this._mode !== "overlay",
+				persist: () => this._pinned || this._desktopOverlay,
 			});
 			this._saveWindowState = saveState;
 			if (restored && typeof state?.x === "number" && typeof state?.y === "number") {
-				this._restoredBounds = { x: state.x, y: state.y };
+				this._restoredBounds = {
+					x: state.x,
+					y: state.y,
+					width: typeof state.width === "number" ? state.width : TRAY_VIEW_WIDTH,
+					height: typeof state.height === "number" ? state.height : TRAY_VIEW_HEIGHT,
+				};
 			}
 
 			this.applyPinFlags(win);
-			const onOverlayChange = () => {
-				if (this._mode === "overlay") {
-					this._overlayBounds = win.getBounds();
-				}
-			};
-			win.on("move", () => {
-				onOverlayChange();
-				this.persistMoved();
-			});
-			win.on("moved", () => {
-				onOverlayChange();
-				this.persistMoved();
-			});
-			win.on("resize", onOverlayChange);
+			win.on("move", () => this.persistMoved());
+			win.on("moved", () => this.persistMoved());
+			win.on("resize", () => this.persistMoved());
+			win.on("resized", () => this.persistMoved());
 
 			const dismiss = () => {
-				if (this._pinned || this._mode === "overlay") return;
+				if (this._pinned || this._desktopOverlay) return;
 				win.hide();
 				this.emitState(false);
 			};
@@ -221,7 +264,7 @@ export default class TrayViewProvider extends BaseProvider implements AfterInit,
 			});
 			win.on("blur", () => {
 				if (win.isDestroyed() || !win.isVisible()) return;
-				if (this._pinned || this._mode === "overlay") return;
+				if (this._pinned || this._desktopOverlay) return;
 				if (Date.now() < this._suppressBlurUntil) return;
 				this._blurHiddenAt = Date.now();
 				dismiss();
@@ -248,39 +291,49 @@ export default class TrayViewProvider extends BaseProvider implements AfterInit,
 		this.windowContext.sendToAllViews("trayview.state", {
 			active,
 			pinned: this._pinned,
-			mode: this._mode,
+			contentMode: this._contentMode,
+			desktopOverlay: this._desktopOverlay,
 			clickThrough: this._clickThrough,
+			mode: this._desktopOverlay ? "overlay" : this._contentMode,
 		});
 	}
 
 	private applyPinFlags(win: BrowserWindow) {
 		if (win.isDestroyed()) return;
 		this.suppressBlur(400);
-		if (this._mode === "overlay") {
-			win.setMovable(true);
-			win.setAlwaysOnTop(true, "screen-saver");
-			win.setSkipTaskbar(true);
-			win.setVisibleOnAllWorkspaces(true, {
-				visibleOnFullScreen: true,
-				skipTransformProcessType: true,
-			});
-			win.setIgnoreMouseEvents(this._clickThrough, { forward: true });
-			return;
+
+		const isOverlay = this._desktopOverlay;
+		const isPinned = this._pinned;
+		const shouldBeAlwaysOnTop = isOverlay || isPinned;
+
+		// 1. Mouse events: ignore only when overlay is active AND clickThrough is true
+		if (isOverlay && this._clickThrough) {
+			win.setIgnoreMouseEvents(true, { forward: true });
+		} else {
+			win.setIgnoreMouseEvents(false);
 		}
 
-		win.setIgnoreMouseEvents(false);
-		win.setMovable(this._pinned);
-		if (this._pinned) {
-			win.setAlwaysOnTop(true, "floating");
-			win.setSkipTaskbar(false);
+		// 2. Movable & Resizable
+		win.setResizable(true);
+		win.setMovable(isOverlay || isPinned);
+
+		// 3. Keep skipTaskbar: true so it behaves as floating HUD and doesn't steal taskbar focus
+		win.setSkipTaskbar(true);
+
+		// 4. Always on top:
+		// When pinned OR desktop overlay is ON:
+		// Always use "screen-saver" level (highest official Electron level on Windows & macOS)
+		// so it stays reliably above normal, maximized, and borderless fullscreen windows (YouTube, browser, games).
+		if (shouldBeAlwaysOnTop) {
+			win.setAlwaysOnTop(true, "screen-saver");
 			win.setVisibleOnAllWorkspaces(true, {
 				visibleOnFullScreen: true,
 				skipTransformProcessType: true,
 			});
 		} else {
-			win.setSkipTaskbar(true);
-			win.setVisibleOnAllWorkspaces(false);
+			// Normal unpinned tray popup: standard pop-up level, dismissed on blur
 			win.setAlwaysOnTop(true, "pop-up-menu");
+			win.setVisibleOnAllWorkspaces(false);
 		}
 	}
 
@@ -290,8 +343,8 @@ export default class TrayViewProvider extends BaseProvider implements AfterInit,
 		const win = this.getWindow();
 		if (win) {
 			this.applyPinFlags(win);
-			if (!this._pinned && this._mode !== "overlay") this.dockToTray(win);
-			else this._saveWindowState?.();
+			if (!this._pinned && !this._desktopOverlay) this.dockToTray(win);
+			else if (this._pinned || this._desktopOverlay) this._saveWindowState?.();
 		}
 		this.emitState(win?.isVisible() ?? false);
 		return this._pinned;
@@ -301,33 +354,26 @@ export default class TrayViewProvider extends BaseProvider implements AfterInit,
 		return this.setPinned(!this._pinned);
 	}
 
-	isPinned(): boolean {
-		return this._pinned;
+	setContentMode(mode: ContentMode, persist = true): ContentMode {
+		this._contentMode = mode === "lyrics" ? "lyrics" : "player";
+		if (persist) this.settings.set("trayView.contentMode", this._contentMode);
+		const win = this.getWindow();
+		this.emitState(win?.isVisible() ?? false);
+		return this._contentMode;
 	}
 
-	async setMode(mode: TrayViewMode): Promise<TrayViewMode> {
-		this._mode = mode;
+	async setDesktopOverlay(enabled: boolean, persist = true): Promise<boolean> {
+		this._desktopOverlay = enabled;
+		if (persist) this.settings.set("trayView.desktopOverlay", enabled);
 		const win = await this.ensureWindow();
-		if (mode === "overlay") {
-			win.setResizable(true);
-			win.setMovable(true);
-			win.setAlwaysOnTop(true, "screen-saver");
-			win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
-			win.setSkipTaskbar(true);
 
-			const nearest = screen.getDisplayNearestPoint(win.getBounds()).workArea;
-			const targetW = this._overlayBounds?.width ?? OVERLAY_VIEW_WIDTH;
-			const targetH = this._overlayBounds?.height ?? OVERLAY_VIEW_HEIGHT;
-			const targetX = this._overlayBounds?.x ?? Math.round(nearest.x + (nearest.width - targetW) / 2);
-			const targetY = this._overlayBounds?.y ?? Math.round(nearest.y + nearest.height - targetH - 60);
-
-			win.setBounds({ x: targetX, y: targetY, width: targetW, height: targetH });
-			win.setIgnoreMouseEvents(this._clickThrough, { forward: true });
+		if (enabled) {
+			this.applyPinFlags(win);
 			if (!win.isVisible()) win.show();
 			win.moveTop();
 		} else {
+			this._clickThrough = false;
 			win.setIgnoreMouseEvents(false);
-			win.setBounds({ width: TRAY_VIEW_WIDTH, height: TRAY_VIEW_HEIGHT });
 			this.applyPinFlags(win);
 			if (!this._pinned) {
 				this.dockToTray(win);
@@ -336,14 +382,31 @@ export default class TrayViewProvider extends BaseProvider implements AfterInit,
 			}
 		}
 		this.emitState(win.isVisible());
-		return this._mode;
+		return this._desktopOverlay;
+	}
+
+	async toggleDesktopOverlay(): Promise<boolean> {
+		return await this.setDesktopOverlay(!this._desktopOverlay);
+	}
+
+	// Backward compatibility for legacy mode API
+	async setMode(mode: TrayViewMode): Promise<TrayViewMode> {
+		if (mode === "overlay") {
+			await this.setDesktopOverlay(true);
+		} else {
+			this.setContentMode(mode);
+			if (this._desktopOverlay) {
+				await this.setDesktopOverlay(false);
+			}
+		}
+		return this.mode;
 	}
 
 	setClickThrough(enabled: boolean): boolean {
 		this._clickThrough = enabled;
 		const win = this.getWindow();
 		if (win) {
-			if (this._mode === "overlay") {
+			if (this._desktopOverlay) {
 				win.setIgnoreMouseEvents(enabled, { forward: true });
 			} else {
 				win.setIgnoreMouseEvents(false);
@@ -357,19 +420,37 @@ export default class TrayViewProvider extends BaseProvider implements AfterInit,
 		return this.setClickThrough(!this._clickThrough);
 	}
 
+	setBounds(bounds: TrayViewBounds): TrayViewBounds {
+		const win = this.getWindow();
+		const clamped = clampToVisibleWorkArea(bounds.x, bounds.y, bounds.width, bounds.height);
+		this._restoredBounds = clamped;
+		if (win && !win.isDestroyed()) {
+			win.setBounds(clamped);
+			if (this._pinned || this._desktopOverlay) {
+				this.persistMoved();
+			}
+		}
+		return clamped;
+	}
+
 	private restorePosition(win: BrowserWindow) {
 		if (win.isDestroyed()) return;
 		if (!this._restoredBounds) {
 			this.dockToTray(win);
 			return;
 		}
-		const pos = clampToVisibleWorkArea(this._restoredBounds.x, this._restoredBounds.y);
+		const pos = clampToVisibleWorkArea(
+			this._restoredBounds.x,
+			this._restoredBounds.y,
+			this._restoredBounds.width,
+			this._restoredBounds.height,
+		);
 		this._restoredBounds = pos;
-		win.setPosition(pos.x, pos.y);
+		win.setBounds(pos);
 	}
 
 	private present(win: BrowserWindow) {
-		if (this._mode === "overlay") {
+		if (this._desktopOverlay) {
 			win.show();
 			win.moveTop();
 			return;
@@ -394,7 +475,7 @@ export default class TrayViewProvider extends BaseProvider implements AfterInit,
 	}
 
 	async hide(): Promise<void> {
-		if (this._pinned || this._mode === "overlay") return;
+		if (this._pinned || this._desktopOverlay) return;
 		const win = this.getWindow();
 		if (!win) return;
 		if (win.isVisible()) win.hide();
@@ -414,13 +495,14 @@ export default class TrayViewProvider extends BaseProvider implements AfterInit,
 
 	async toggle(): Promise<number | null> {
 		const win = await this.ensureWindow();
-		if (this._mode === "overlay") {
+		if (this._desktopOverlay) {
 			if (win.isVisible()) {
 				win.hide();
 				this.emitState(false);
 				return null;
 			}
 			win.show();
+			win.moveTop();
 			this.emitState(true);
 			return win.id;
 		}

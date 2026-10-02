@@ -1,23 +1,21 @@
 import { Volume, Volume1, Volume2, VolumeX } from "lucide-react";
-import { useCallback, useMemo, type WheelEvent } from "react";
+import { useCallback, useMemo, useState, type WheelEvent } from "react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
 import { useVolume } from "@/hooks/use-volume";
 import { cn } from "@/lib/utils";
 
 export interface VolumeControlProps {
 	className?: string;
-	sliderWidth?: string;
-	showPercentage?: boolean;
 	ariaLabel?: string;
 }
 
 export function VolumeControl({
 	className,
-	sliderWidth = "w-16 sm:w-20",
-	showPercentage = true,
 	ariaLabel = "Volume Control",
 }: VolumeControlProps) {
 	const { volume, muted, setVolume, toggleMute, setIsDragging } = useVolume();
+	const [open, setOpen] = useState(false);
 
 	// When muted, audio level is 0, but slider/percentage can show 0 or muted volume
 	const displayVolume = muted ? 0 : volume;
@@ -62,47 +60,63 @@ export function VolumeControl({
 	);
 
 	return (
-		<div
-			className={cn("no-drag flex items-center gap-1.5 select-none", className)}
-			onWheel={handleWheel}
-			role="group"
-			aria-label={ariaLabel}
-		>
-			{/* Mute / Unmute Button */}
-			<button
+		<Popover open={open} onOpenChange={setOpen}>
+			<PopoverTrigger
 				type="button"
-				onClick={toggleMute}
-				aria-label={muted ? "Unmute" : "Mute"}
-				title={muted ? "Unmute" : "Mute"}
-				className="flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-hidden"
+				aria-label={ariaLabel}
+				title={muted ? `Muted (${volume}%)` : `Volume: ${volume}%`}
+				className={cn(
+					"no-drag flex size-7 shrink-0 items-center justify-center rounded-full text-foreground transition-[transform,background-color,color] duration-100 hover:bg-foreground/10 active:scale-95 focus-visible:outline-hidden",
+					open && "bg-foreground/15 text-accent",
+					className,
+				)}
 			>
-				<VolumeIcon className="size-3.5" />
-			</button>
+				<VolumeIcon className="size-4" />
+			</PopoverTrigger>
 
-			{/* Slider */}
-			<div
-				className={cn("flex items-center", sliderWidth)}
-				onPointerDown={() => setIsDragging(true)}
+			<PopoverContent
+				side="top"
+				align="end"
+				sideOffset={8}
+				className="no-drag z-50 flex w-auto flex-row items-center gap-2 rounded-full border border-border/50 bg-background/95 px-3 py-1.5 shadow-xl backdrop-blur-md"
+				onWheel={handleWheel}
+				role="group"
+				aria-label={ariaLabel}
 			>
-				<Slider
-					min={0}
-					max={100}
-					step={1}
-					value={[displayVolume]}
-					aria-label="Volume"
-					onValueChange={handleValueChange}
-					onValueCommitted={handleValueCommit}
-					className="w-full"
-				/>
-			</div>
+				{/* Mute / Unmute Button inside popover */}
+				<button
+					type="button"
+					onClick={toggleMute}
+					aria-label={muted ? "Unmute" : "Mute"}
+					title={muted ? "Unmute" : "Mute"}
+					className="flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-hidden"
+				>
+					<VolumeIcon className="size-3.5" />
+				</button>
 
-			{/* Percentage Label */}
-			{showPercentage ? (
+				{/* Slider */}
+				<div
+					className="flex w-24 items-center"
+					onPointerDown={() => setIsDragging(true)}
+				>
+					<Slider
+						min={0}
+						max={100}
+						step={1}
+						value={[displayVolume]}
+						aria-label="Volume"
+						onValueChange={handleValueChange}
+						onValueCommitted={handleValueCommit}
+						className="w-full"
+					/>
+				</div>
+
+				{/* Percentage Label */}
 				<span className="w-7 text-right font-mono text-[10px] font-semibold tabular-nums text-muted-foreground select-none">
 					{displayVolume}%
 				</span>
-			) : null}
-		</div>
+			</PopoverContent>
+		</Popover>
 	);
 }
 
